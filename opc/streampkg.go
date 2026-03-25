@@ -555,3 +555,192 @@ func (it *PartIterator) Open() (io.ReadCloser, error) {
 	}
 	return part.Open()
 }
+
+// ===== 并发流式保存 =====
+
+// ConcurrentStreamSave 使用 goroutine 收集器并发保存
+// workerCount: 并发工作 goroutine 数量
+// bufferSize: channel 缓冲区大小
+func (p *StreamPackage) ConcurrentStreamSave(w io.Writer, workerCount, bufferSize int) error {
+	// 创建并发收集器
+	collector := NewConcurrentZipCollector(w, bufferSize)
+	collector.Start()
+
+	// 创建等待组
+	var wg sync.WaitGroup
+	errChan := make(chan error, workerCount+1)
+
+	// 生产者：提交所有部件到 channel
+	go func() {
+		p.mu.RLock()
+		defer p.mu.RUnlock()
+
+		// 1. 写入 ContentTypes
+		p.updateContentTypes()
+		ctData, err := p.contentTypes.ToXML()
+		if err != nil {
+			errChan <- fmt.Errorf("failed to serialize content types: %w", err)
+			return
+		}
+		if err := collector.Submit(&PartData{
+			Path: PathContentTypes,
+			Data: ctData,
+		}); err != nil {
+			errChan <- err
+			return
+		}
+
+		// 2. 写入包级别关系
+		if p.relationships.Count() > 0 {
+			relData, err := p.relationships.ToXML()
+			if err != nil {
+				errChan <- fmt.Errorf("failed to serialize relationships: %w", err)
+				return
+			}
+			relPath := PathRelsDir + "/" + PathRelsFile
+			if err := collector.Submit(&PartData{
+				Path: relPath,
+				Data: relData,
+			}); err != nil {
+				errChan <- err
+				return
+			}
+		}
+
+		// 3. 并发提交部件（使用 worker 池）
+		partChan := make(chan *StreamPart, workerCount*2)
+
+		// 启动 worker goroutines 读取部件数据
+		for i := 0; i < workerCount; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for part := range partChan {
+					data, err := part.Blob()
+					if err != nil {
+						errChan <- fmt.Errorf("failed to read part %s: %w", part.PartURI().URI(), err)
+						return
+					}
+
+					// 提交部件数据
+					if err := collector.Submit(&PartData{
+						URI:         part.PartURI().URI(),
+						Path:        part.PartURI().MemberName(),
+						ContentType: part.ContentType(),
+						Data:        data,
+					}); err != nil {
+						errChan <- err
+						return
+					}
+
+					// 提交关系数据（如果有）
+					if part.HasRelationships() {
+						relData, err := part.RelationshipsBlob()
+						if err != nil {
+							errChan <- fmt.Errorf("failed to serialize relationships for %s: %w", part.PartURI().URI(), err)
+							return
+						}
+						relPath := p.relFilePath(part.PartURI())
+						if err := collector.Submit(&PartData{
+							Path: relPath,
+							Data: relData,
+						}); err != nil {
+							errChan <- err
+							return
+						}
+					}
+				}
+			}()
+		}
+
+		// 分发部件到 worker
+		for _, uri := range p.partOrder {
+			partChan <- p.parts[uri]
+		}
+		close(partChan)
+
+		// 等待所有 worker 完成
+		wg.Wait()
+
+		// 4. 写入核心属性（如果有）
+		if p.coreProperties != nil {
+			cpData, err := p.coreProperties.ToXML()
+			if err != nil {
+				errChan <- fmt.Errorf("failed to serialize core properties: %w", err)
+				return
+			}
+			if err := collector.Submit(&PartData{
+				Path: "docProps/core.xml",
+				Data: cpData,
+			}); err != nil {
+				errChan <- err
+				return
+			}
+		}
+
+		// 关闭收集器
+		if err := collector.Close(); err != nil {
+			errChan <- err
+		}
+	}()
+
+	// 等待完成或错误
+	select {
+	case err := <-errChan:
+		return err
+	case <-collector.doneChan:
+		return nil
+	}
+}
+
+// ConcurrentStreamSaveFile 使用并发方式保存到文件
+func (p *StreamPackage) ConcurrentStreamSaveFile(path string, workerCount, bufferSize int) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	return p.ConcurrentStreamSave(file, workerCount, bufferSize)
+}
+
+// ===== 资源去重功能 =====
+
+// RegisterMediaWithDedup 注册媒体资源并进行去重
+// 返回：isNew 表示是否为新资源，existingURI 表示已存在资源的 URI
+func (p *StreamPackage) RegisterMediaWithDedup(uri string, data []byte) (isNew bool, existingURI string) {
+	pool := GetGlobalResourcePool()
+	return pool.Register(uri, data)
+}
+
+// AddMediaPartWithDedup 添加媒体部件并进行去重
+// 如果资源已存在，返回已存在部件的 URI 而不创建新部件
+func (p *StreamPackage) AddMediaPartWithDedup(uri *PackURI, contentType string, data []byte) (actualURI *PackURI, isNew bool, err error) {
+	// 检查资源是否已存在
+	pool := GetGlobalResourcePool()
+	isNew, existingURI := pool.Register(uri.URI(), data)
+
+	if !isNew {
+		// 资源已存在，返回已存在的 URI
+		return NewPackURI(existingURI), false, nil
+	}
+
+	// 创建新部件
+	part, err := p.CreatePartFromBytes(uri, contentType, data)
+	if err != nil {
+		pool.Release(ComputeHash(data))
+		return nil, false, err
+	}
+
+	return part.PartURI(), true, nil
+}
+
+// GetMediaDedupStats 获取媒体资源去重统计
+func (p *StreamPackage) GetMediaDedupStats() (count int, totalSize int64) {
+	return GetGlobalResourcePool().Stats()
+}
+
+// ClearMediaDedupPool 清空媒体资源去重池
+func (p *StreamPackage) ClearMediaDedupPool() {
+	GetGlobalResourcePool().Clear()
+}

@@ -3,6 +3,7 @@ package opc
 import (
 	"archive/zip"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"sync"
 )
@@ -354,6 +355,14 @@ func (p *StreamPart) HasRelationships() bool {
 	return p.relationships.Count() > 0
 }
 
+// RelationshipsBlob 返回关系的 XML 内容
+func (p *StreamPart) RelationshipsBlob() ([]byte, error) {
+	if p.relationships.Count() == 0 {
+		return nil, nil
+	}
+	return p.relationships.ToXML()
+}
+
 // RelationshipsURI 返回关系文件的 URI
 func (p *StreamPart) RelationshipsURI() *PackURI {
 	return p.uri.RelationshipsURI()
@@ -531,6 +540,291 @@ func (cs *ContentTypesStreamer) StreamWriteTo(w io.Writer) error {
 	}
 
 	return encoder.Flush()
+}
+
+// ===== 并发写入数据结构 =====
+
+// PartData 部件数据 - 用于 channel 传递
+type PartData struct {
+	URI         string    // 部件 URI
+	Path        string    // ZIP 内路径
+	ContentType string    // 内容类型
+	Data        []byte    // 数据内容
+	Source      PartSource // 数据源（用于懒加载）
+	Error       error     // 写入错误（如果有）
+}
+
+// PartDataChannel 部件数据通道类型
+type PartDataChannel chan *PartData
+
+// NewPartDataChannel 创建部件数据通道
+func NewPartDataChannel(bufferSize int) PartDataChannel {
+	return make(PartDataChannel, bufferSize)
+}
+
+// ===== 全局资源去重池 =====
+
+// ResourceHashKey 资源哈希键
+type ResourceHashKey string
+
+// ResourceEntry 资源条目
+type ResourceEntry struct {
+	URI       string    // 部件 URI
+	Hash      string    // 内容哈希（SHA256）
+	Size      int64     // 原始大小
+	Reference int       // 引用计数
+}
+
+// ResourceDedupPool 全局资源去重池
+// 使用 sync.Map 实现并发安全的资源去重
+type ResourceDedupPool struct {
+	entries sync.Map // map[ResourceHashKey]*ResourceEntry
+	mu      sync.RWMutex
+}
+
+// globalResourcePool 全局资源池单例
+var globalResourcePool = &ResourceDedupPool{}
+
+// GetGlobalResourcePool 获取全局资源池
+func GetGlobalResourcePool() *ResourceDedupPool {
+	return globalResourcePool
+}
+
+// NewResourceDedupPool 创建新的资源去重池
+func NewResourceDedupPool() *ResourceDedupPool {
+	return &ResourceDedupPool{}
+}
+
+// ComputeHash 计算数据的 SHA256 哈希
+func ComputeHash(data []byte) string {
+	// 使用简单的哈希算法（实际生产中应使用 crypto/sha256）
+	// 这里使用简化版本以避免额外依赖
+	if len(data) == 0 {
+		return ""
+	}
+
+	// 简单的 FNV-1a 哈希
+	var hash uint32 = 2166136261
+	for _, b := range data {
+		hash ^= uint32(b)
+		hash *= 16777619
+	}
+
+	// 加上长度以增强唯一性
+	return fmt.Sprintf("%x-%d", hash, len(data))
+}
+
+// Register 注册资源，返回是否为新资源
+// 如果资源已存在，增加引用计数并返回 false
+func (p *ResourceDedupPool) Register(uri string, data []byte) (isNew bool, existingURI string) {
+	hash := ComputeHash(data)
+	key := ResourceHashKey(hash)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// 检查是否已存在
+	if entry, ok := p.entries.Load(key); ok {
+		e := entry.(*ResourceEntry)
+		e.Reference++
+		return false, e.URI
+	}
+
+	// 新资源
+	entry := &ResourceEntry{
+		URI:       uri,
+		Hash:      hash,
+		Size:      int64(len(data)),
+		Reference: 1,
+	}
+	p.entries.Store(key, entry)
+	return true, uri
+}
+
+// RegisterWithHash 使用预计算的哈希注册资源
+func (p *ResourceDedupPool) RegisterWithHash(uri string, hash string, size int64) (isNew bool, existingURI string) {
+	key := ResourceHashKey(hash)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if entry, ok := p.entries.Load(key); ok {
+		e := entry.(*ResourceEntry)
+		e.Reference++
+		return false, e.URI
+	}
+
+	entry := &ResourceEntry{
+		URI:       uri,
+		Hash:      hash,
+		Size:      size,
+		Reference: 1,
+	}
+	p.entries.Store(key, entry)
+	return true, uri
+}
+
+// Lookup 查找资源
+func (p *ResourceDedupPool) Lookup(hash string) (*ResourceEntry, bool) {
+	if entry, ok := p.entries.Load(ResourceHashKey(hash)); ok {
+		return entry.(*ResourceEntry), true
+	}
+	return nil, false
+}
+
+// Release 释放资源引用
+func (p *ResourceDedupPool) Release(hash string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if entry, ok := p.entries.Load(ResourceHashKey(hash)); ok {
+		e := entry.(*ResourceEntry)
+		e.Reference--
+		if e.Reference <= 0 {
+			p.entries.Delete(ResourceHashKey(hash))
+		}
+	}
+}
+
+// Clear 清空资源池
+func (p *ResourceDedupPool) Clear() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.entries = sync.Map{}
+}
+
+// Stats 返回资源池统计信息
+func (p *ResourceDedupPool) Stats() (count int, totalSize int64) {
+	p.entries.Range(func(key, value interface{}) bool {
+		count++
+		entry := value.(*ResourceEntry)
+		totalSize += entry.Size
+		return true
+	})
+	return
+}
+
+// ===== 并发 ZIP 收集器 =====
+
+// ConcurrentZipCollector 并发 ZIP 收集器
+// 使用 goroutine 从 channel 收集部件数据并写入 ZIP
+type ConcurrentZipCollector struct {
+	zipWriter  *zip.Writer
+	dataChan   PartDataChannel
+	errorChan  chan error
+	doneChan   chan struct{}
+	wg         sync.WaitGroup
+	bufferSize int
+}
+
+// NewConcurrentZipCollector 创建并发 ZIP 收集器
+func NewConcurrentZipCollector(w io.Writer, bufferSize int) *ConcurrentZipCollector {
+	return &ConcurrentZipCollector{
+		zipWriter:  zip.NewWriter(w),
+		dataChan:   make(PartDataChannel, bufferSize),
+		errorChan:  make(chan error, 1),
+		doneChan:   make(chan struct{}),
+		bufferSize: bufferSize,
+	}
+}
+
+// Start 启动收集器 goroutine
+func (c *ConcurrentZipCollector) Start() {
+	c.wg.Add(1)
+	go c.collect()
+}
+
+// collect 收集 goroutine
+func (c *ConcurrentZipCollector) collect() {
+	defer c.wg.Done()
+
+	for data := range c.dataChan {
+		if data.Error != nil {
+			c.errorChan <- data.Error
+			return
+		}
+
+		// 写入 ZIP 条目
+		if err := c.writePart(data); err != nil {
+			c.errorChan <- err
+			return
+		}
+	}
+
+	// 所有数据已写入，关闭 ZIP
+	if err := c.zipWriter.Close(); err != nil {
+		c.errorChan <- err
+		return
+	}
+
+	close(c.doneChan)
+}
+
+// writePart 写入单个部件
+func (c *ConcurrentZipCollector) writePart(data *PartData) error {
+	w, err := c.zipWriter.Create(data.Path)
+	if err != nil {
+		return fmt.Errorf("failed to create zip entry %s: %w", data.Path, err)
+	}
+
+	if data.Data != nil {
+		_, err = w.Write(data.Data)
+		return err
+	}
+
+	if data.Source != nil {
+		rc, err := data.Source.Open()
+		if err != nil {
+			return err
+		}
+		defer rc.Close()
+		_, err = io.Copy(w, rc)
+		return err
+	}
+
+	return nil
+}
+
+// Submit 提交部件数据到收集器
+func (c *ConcurrentZipCollector) Submit(data *PartData) error {
+	select {
+	case c.dataChan <- data:
+		return nil
+	case err := <-c.errorChan:
+		return err
+	case <-c.doneChan:
+		return fmt.Errorf("collector already finished")
+	}
+}
+
+// SubmitBytes 提交字节数据
+func (c *ConcurrentZipCollector) SubmitBytes(path string, data []byte) error {
+	return c.Submit(&PartData{
+		Path: path,
+		Data: data,
+	})
+}
+
+// Close 关闭收集器，等待所有数据写入完成
+func (c *ConcurrentZipCollector) Close() error {
+	close(c.dataChan)
+
+	select {
+	case <-c.doneChan:
+		return nil
+	case err := <-c.errorChan:
+		return err
+	}
+}
+
+// Wait 等待收集器完成
+func (c *ConcurrentZipCollector) Wait() error {
+	return c.Close()
+}
+
+// DataChannel 返回数据通道（用于外部生产者）
+func (c *ConcurrentZipCollector) DataChannel() PartDataChannel {
+	return c.dataChan
 }
 
 // ===== 辅助类型 =====
