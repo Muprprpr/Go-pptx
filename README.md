@@ -16,6 +16,9 @@ A Go library for creating, reading, and modifying PowerPoint (PPTX) files with s
 - **Streaming I/O**: Handle large files efficiently with lazy loading
 - **OPC Implementation**: Complete Open Packaging Convention implementation
 - **Thread Safe**: Safe for concurrent use
+  - `sync/atomic` for relationship ID allocation
+  - `sync.RWMutex` for thread-safe operations
+  - `sync.Map` for resource deduplication
 - **Zero Dependencies**: Only uses Go standard library
 
 ### Installation
@@ -94,6 +97,50 @@ func main() {
 | Modifying few parts | Streaming |
 | Random access to all content | Traditional |
 
+### Thread-Safe Relationship ID Allocation
+
+`Relationships` uses `sync/atomic.Int32` for thread-safe relationship ID allocation when multiple goroutines call `AddRelationship()` concurrently.
+
+```go
+// Automatic atomic ID allocation
+rels := opc.NewRelationships(sourceURI)
+rel1, _ := rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide1.xml", false)  // rId1
+rel2, _ := rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide2.xml", false)  // rId2
+
+// Preview next ID without consuming
+nextID := rels.NextRID()  // "rId3"
+
+// Thread-safe for concurrent calls
+var wg sync.WaitGroup
+for i := 0; i < 10; i++ {
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide.xml", false)
+    }()
+}
+wg.Wait()
+// All IDs are unique, no duplicates
+```
+
+**Key features:**
+- `AddNew()` uses atomic operations, safe for concurrent calls
+- Counter auto-initializes from existing relationships when loading from XML
+- `NextRID()` previews the next ID without consuming
+
+### Concurrent Streaming (Advanced)
+
+For high-performance scenarios, the library provides concurrent streaming capabilities:
+
+| Feature | Description |
+|---------|-------------|
+| `PartDataChannel` | Channel-based concurrent part writing |
+| `ResourceDedupPool` | `sync.Map` based image/media deduplication |
+| `ConcurrentZipCollector` | Goroutine-based ZIP writing |
+| `ConcurrentStreamSave` | Worker-based concurrent save |
+
+See [Streaming Design](docs/streaming-design.md) for detailed documentation.
+
 ### Documentation
 
 - [Streaming Design](docs/streaming-design.md) - Detailed streaming architecture
@@ -138,6 +185,9 @@ MIT License
 - **流式 I/O**：通过懒加载高效处理大文件
 - **OPC 实现**：完整的 Open Packaging Convention 实现
 - **线程安全**：支持并发使用
+  - `sync/atomic` 用于关系 ID 分配
+  - `sync.RWMutex` 用于线程安全操作
+  - `sync.Map` 用于资源去重
 - **零依赖**：只使用 Go 标准库
 
 ### 安装
@@ -215,6 +265,50 @@ func main() {
 | 修改大量部件 | 传统 |
 | 修改少量部件 | 流式 |
 | 随机访问所有内容 | 传统 |
+
+### 线程安全的关系 ID 分配
+
+`Relationships` 使用 `sync/atomic.Int32` 实现线程安全的关系 ID 分配，确保多个 Goroutine 并发调用 `AddRelationship()` 时不会产生冲突。
+
+```go
+// 自动原子 ID 分配
+rels := opc.NewRelationships(sourceURI)
+rel1, _ := rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide1.xml", false)  // rId1
+rel2, _ := rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide2.xml", false)  // rId2
+
+// 预览下一个 ID（不消耗）
+nextID := rels.NextRID()  // "rId3"
+
+// 并发调用线程安全
+var wg sync.WaitGroup
+for i := 0; i < 10; i++ {
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide.xml", false)
+    }()
+}
+wg.Wait()
+// 所有 ID 都是唯一的，无重复
+```
+
+**核心特性：**
+- `AddNew()` 使用原子操作，并发调用安全
+- 从 XML 加载时自动初始化计数器为现有最大 ID
+- `NextRID()` 预览下一个 ID 而不消耗
+
+### 并发流式处理（高级）
+
+对于高性能场景，库提供了并发流式处理能力：
+
+| 功能 | 描述 |
+|------|------|
+| `PartDataChannel` | 基于 channel 的并发部件写入 |
+| `ResourceDedupPool` | 基于 `sync.Map` 的图片/媒体去重 |
+| `ConcurrentZipCollector` | 基于 Goroutine 的 ZIP 写入器 |
+| `ConcurrentStreamSave` | 基于 Worker 的并发保存 |
+
+详细文档请参阅[流式设计](docs/streaming-design.md)。
 
 ### 文档
 

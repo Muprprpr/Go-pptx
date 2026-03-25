@@ -1,6 +1,8 @@
 package utils_test
 
 import (
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Muprprpr/Go-pptx/opc"
@@ -343,5 +345,127 @@ func TestParseRelationshipsFromXML(t *testing.T) {
 
 	if rels.Count() != 1 {
 		t.Errorf("Count = %d, want 1", rels.Count())
+	}
+}
+
+// ===== 并发 ID 分配测试 =====
+
+func TestRelationships_ConcurrentIDAllocation(t *testing.T) {
+	source := opc.NewPackURI("/ppt/presentation.xml")
+	rels := opc.NewRelationships(source)
+
+	// 并发添加关系
+	const goroutines = 10
+	const relationsPerGoroutine = 100
+
+	var wg sync.WaitGroup
+	rIDs := make([][]string, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		rIDs[i] = make([]string, 0, relationsPerGoroutine)
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			for j := 0; j < relationsPerGoroutine; j++ {
+				rel, err := rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide.xml", false)
+				if err != nil {
+					t.Errorf("goroutine %d: AddNew failed: %v", idx, err)
+					return
+				}
+				rIDs[idx] = append(rIDs[idx], rel.RID())
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// 验证总关系数
+	if rels.Count() != goroutines*relationsPerGoroutine {
+		t.Errorf("Count = %d, want %d", rels.Count(), goroutines*relationsPerGoroutine)
+	}
+
+	// 验证所有 ID 都是唯一的
+	idSet := make(map[string]bool)
+	for _, ids := range rIDs {
+		for _, id := range ids {
+			if idSet[id] {
+				t.Errorf("duplicate rID found: %s", id)
+			}
+			idSet[id] = true
+		}
+	}
+
+	// 验证 ID 格式正确
+	for id := range idSet {
+		if !strings.HasPrefix(id, "rId") {
+			t.Errorf("invalid rID format: %s", id)
+		}
+	}
+}
+
+func TestRelationships_InitRIDCounter(t *testing.T) {
+	source := opc.NewPackURI("/ppt/presentation.xml")
+
+	// 从 XML 加载包含现有关系的集合
+	xmlData := `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide3.xml"/>
+</Relationships>`
+
+	rels := opc.NewRelationships(source)
+	err := rels.FromXML([]byte(xmlData))
+	if err != nil {
+		t.Fatalf("FromXML failed: %v", err)
+	}
+
+	// FromXML 会自动初始化计数器为最大值 5
+	// NextRID 预览下一个（Load + 1），不消耗计数器
+	nextRID := rels.NextRID()
+	if nextRID != "rId6" {
+		t.Errorf("NextRID after InitRIDCounter = %s, want rId6", nextRID)
+	}
+
+	// AddNew 分配下一个 ID（使用 Add，返回新值）
+	// 第一个 AddNew 应该得到 rId6
+	rel, err := rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide4.xml", false)
+	if err != nil {
+		t.Fatalf("AddNew failed: %v", err)
+	}
+	if rel.RID() != "rId6" {
+		t.Errorf("new relationship RID = %s, want rId6", rel.RID())
+	}
+
+	// 第二个 AddNew 应该得到 rId7
+	rel2, err := rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide5.xml", false)
+	if err != nil {
+		t.Fatalf("AddNew failed: %v", err)
+	}
+	if rel2.RID() != "rId7" {
+		t.Errorf("second new relationship RID = %s, want rId7", rel2.RID())
+	}
+}
+
+func TestRelationships_ClonePreservesCounter(t *testing.T) {
+	source := opc.NewPackURI("/ppt/presentation.xml")
+	rels := opc.NewRelationships(source)
+
+	// 添加一些关系
+	rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide1.xml", false)
+	rels.AddNew(opc.RelTypeSlide, "/ppt/slides/slide2.xml", false)
+
+	// 克隆
+	cloned := rels.Clone()
+
+	// 克隆后的 NextRID 应该与原始相同
+	if rels.NextRID() != cloned.NextRID() {
+		t.Errorf("cloned NextRID = %s, want %s", cloned.NextRID(), rels.NextRID())
+	}
+
+	// 在克隆中添加关系不应该影响原始
+	cloned.AddNew(opc.RelTypeSlide, "/ppt/slides/slide3.xml", false)
+	if rels.Count() != 2 {
+		t.Errorf("original count changed after clone modification")
 	}
 }

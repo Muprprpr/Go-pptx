@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Relationship 表示两个部件之间的关系
@@ -99,6 +100,7 @@ type Relationships struct {
 	order        []string // 保持插入顺序
 	mu           sync.RWMutex
 	sourceURI    *PackURI // 关系所属的源部件
+	rIDCounter   atomic.Int32 // 原子计数器用于生成 rID
 }
 
 // NewRelationships 创建新的关系集合
@@ -129,9 +131,9 @@ func (rs *Relationships) Add(rel *Relationship) error {
 	return nil
 }
 
-// AddNew 创建并添加一个新关系
+// AddNew 创建并添加一个新关系（使用原子操作分配 ID）
 func (rs *Relationships) AddNew(relType, targetURI string, isExternal bool) (*Relationship, error) {
-	rID := rs.NextRID()
+	rID := rs.allocateRID()
 	rel := NewRelationship(rID, relType, targetURI, isExternal, rs.sourceURI)
 	err := rs.Add(rel)
 	if err != nil {
@@ -222,23 +224,28 @@ func (rs *Relationships) Count() int {
 	return len(rs.relationships)
 }
 
-// NextRID 生成下一个关系ID
+// NextRID 返回下一个关系ID（预览，不消耗）
+// 此方法是幂等的，多次调用返回相同的值，直到 AddNew 实际使用
 func (rs *Relationships) NextRID() string {
-	rs.mu.RLock()
-	defer rs.mu.RUnlock()
+	// 读取当前值加 1，但不递增计数器
+	nextID := rs.rIDCounter.Load() + 1
+	return fmt.Sprintf("rId%d", nextID)
+}
 
-	// 找到最大的数字ID
-	maxNum := 0
-	for rID := range rs.relationships {
-		if strings.HasPrefix(rID, "rId") {
-			var num int
-			_, err := fmt.Sscanf(rID, "rId%d", &num)
-			if err == nil && num > maxNum {
-				maxNum = num
-			}
-		}
-	}
-	return fmt.Sprintf("rId%d", maxNum+1)
+// allocateRID 分配并返回下一个关系ID
+// 此方法用于 AddNew 等需要实际分配 ID 的场景
+// 使用原子操作确保线程安全：Int32.Add 返回新值（递增后的值）
+// 例如：计数器=0 时，Add(1) 返回 1（新值），我们直接返回 1
+func (rs *Relationships) allocateRID() string {
+	return fmt.Sprintf("rId%d", rs.rIDCounter.Add(1))
+}
+
+// InitRIDCounter 初始化 rID 计数器（从现有关系中找到最大值）
+// 在从 XML 加载关系后调用，确保新分配的 ID 不会与现有的冲突
+func (rs *Relationships) InitRIDCounter() {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	rs.initRIDCounterLocked()
 }
 
 // SetSourceURI 设置源URI
@@ -271,6 +278,8 @@ func (rs *Relationships) Clone() *Relationships {
 		newRs.relationships[rID] = newRel
 		newRs.order = append(newRs.order, rID)
 	}
+	// 复制原子计数器的当前值
+	newRs.rIDCounter.Store(rs.rIDCounter.Load())
 	return newRs
 }
 
@@ -336,7 +345,25 @@ func (rs *Relationships) UnmarshalXML(d *xml.Decoder, start xml.StartElement) er
 		rs.order = append(rs.order, xrel.ID)
 	}
 
+	// 初始化原子计数器，确保新分配的 ID 不会与现有的冲突
+	rs.initRIDCounterLocked()
+
 	return nil
+}
+
+// initRIDCounterLocked 在已持有锁的情况下初始化 rID 计数器
+func (rs *Relationships) initRIDCounterLocked() {
+	maxNum := int32(0)
+	for rID := range rs.relationships {
+		if strings.HasPrefix(rID, "rId") {
+			var num int
+			_, err := fmt.Sscanf(rID, "rId%d", &num)
+			if err == nil && int32(num) > maxNum {
+				maxNum = int32(num)
+			}
+		}
+	}
+	rs.rIDCounter.Store(maxNum)
 }
 
 // ToXML 将关系集合序列化为XML

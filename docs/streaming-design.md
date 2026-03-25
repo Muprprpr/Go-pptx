@@ -286,6 +286,35 @@ Both `StreamPart` and `StreamPackage` are thread-safe:
 - Multiple goroutines can safely access different parts
 - Loading is atomic and idempotent
 
+#### Atomic Relationship ID Allocation
+
+`Relationships` uses `sync/atomic.Int32` for thread-safe relationship ID allocation:
+
+```go
+type Relationships struct {
+    relationships map[string]*Relationship
+    order       []string
+    mu          sync.RWMutex
+    sourceURI   *PackURI
+    rIDCounter  atomic.Int32  // Atomic counter for rID generation
+}
+
+// NextRID previews the next ID (doesn't consume)
+func (rs *Relationships) NextRID() string {
+    return fmt.Sprintf("rId%d", rs.rIDCounter.Load()+1)
+}
+
+// allocateRID atomically allocates and returns the next ID
+func (rs *Relationships) allocateRID() string {
+    return fmt.Sprintf("rId%d", rs.rIDCounter.Add(1))
+}
+```
+
+**Key features:**
+- `AddNew()` uses atomic operations, safe for concurrent calls from multiple goroutines
+- No duplicate rIDs even with high concurrency
+- Counter is automatically initialized from existing relationships when loading from XML
+
 ### Concurrent Streaming (Advanced)
 
 For high-performance scenarios, the library provides concurrent streaming capabilities.
@@ -720,6 +749,35 @@ for _, part := range pkg.AllParts() {
 - 内部 `sync.RWMutex` 保护所有操作
 - 多个 goroutine 可以安全地访问不同部件
 - 加载是原子且幂等的
+
+#### 原子关系 ID 分配
+
+`Relationships` 使用 `sync/atomic.Int32` 实现线程安全的关系 ID 分配：
+
+```go
+type Relationships struct {
+    relationships map[string]*Relationship
+    order       []string
+    mu          sync.RWMutex
+    sourceURI   *PackURI
+    rIDCounter  atomic.Int32  // 用于 rID 生成的原子计数器
+}
+
+// NextRID 预览下一个 ID（不消耗）
+func (rs *Relationships) NextRID() string {
+    return fmt.Sprintf("rId%d", rs.rIDCounter.Load()+1)
+}
+
+// allocateRID 原子分配并返回下一个 ID
+func (rs *Relationships) allocateRID() string {
+    return fmt.Sprintf("rId%d", rs.rIDCounter.Add(1))
+}
+```
+
+**核心特性：**
+- `AddNew()` 使用原子操作，多个 goroutine 并发调用时安全无冲突
+- 即使高并发也不会产生重复的 rID
+- 从 XML 加载时会自动初始化计数器为现有最大 ID
 
 ### 并发流式处理（高级）
 
