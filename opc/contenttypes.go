@@ -182,5 +182,5 @@ func (ct *ContentTypes) ToXML() ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal content types: %w", err)
 	}
 
-	return append([]byte(xml.Header), output...), nil
+	return append([]byte(XMLDeclaration), output...), nil
 }

@@ -1,6 +1,7 @@
 package utils_test
 
 import (
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -467,5 +468,71 @@ func TestRelationships_ClonePreservesCounter(t *testing.T) {
 	cloned.AddNew(opc.RelTypeSlide, "/ppt/slides/slide3.xml", false)
 	if rels.Count() != 2 {
 		t.Errorf("original count changed after clone modification")
+	}
+}
+
+// TestParseRelationshipsFromFile 测试从真实 .rels 文件解析媒体关系
+func TestParseRelationshipsFromFile(t *testing.T) {
+	// 读取真实的 .rels 文件
+	data, err := os.ReadFile("../test-data/test/ppt/slides/_rels/slide4.xml.rels")
+	if err != nil {
+		t.Fatalf("读取 .rels 文件失败: %v", err)
+	}
+
+	// 反序列化为 Relationships 结构体
+	source := opc.NewPackURI("/ppt/slides/slide4.xml")
+	rels, err := opc.ParseRelationshipsFromXML(data, source)
+
+	// 断言解析无 error 且结果不为 nil
+	if err != nil {
+		t.Fatalf("ParseRelationshipsFromXML 失败: %v", err)
+	}
+	if rels == nil {
+		t.Fatal("ParseRelationshipsFromXML 返回 nil")
+	}
+
+	// 断言解析出的 Relationship 切片长度大于 0
+	allRels := rels.All()
+	if len(allRels) == 0 {
+		t.Fatal("解析出的 Relationship 切片长度为 0")
+	}
+	t.Logf("共解析到 %d 个关系", len(allRels))
+
+	// 遍历切片，找到 Type 包含 image 或 media 的节点
+	var foundMediaRel bool
+	for _, rel := range allRels {
+		relType := rel.Type()
+		// 检查类型是否包含 image 或 media
+		if strings.Contains(relType, "image") || strings.Contains(relType, "media") {
+			foundMediaRel = true
+
+			// 断言 Id (rId) 非空
+			rID := rel.RID()
+			if rID == "" {
+				t.Error("媒体关系的 Id (rId) 为空")
+			} else {
+				t.Logf("找到媒体关系: Id=%s", rID)
+			}
+
+			// 断言 Target 非空
+			target := rel.TargetURI()
+			if target == nil || target.URI() == "" {
+				t.Error("媒体关系的 Target 为空")
+			} else {
+				t.Logf("  Target=%s", target.URI())
+			}
+
+			// 断言 Type 非空
+			if relType == "" {
+				t.Error("媒体关系的 Type 为空")
+			} else {
+				t.Logf("  Type=%s", relType)
+			}
+		}
+	}
+
+	// 确保至少找到一个媒体关系
+	if !foundMediaRel {
+		t.Error("未找到 Type 包含 image 或 media 的关系")
 	}
 }

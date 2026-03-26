@@ -179,3 +179,6 @@ const (
 	PathRelsDir      = "_rels"
 	PathRelsFile     = ".rels"
 )
+
+// XMLDeclaration OPC 包中所有 XML 文件的标准声明头
+const XMLDeclaration = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`

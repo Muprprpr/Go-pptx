@@ -296,5 +296,5 @@ func (cp *CoreProperties) ToXML() ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal core properties: %w", err)
 	}
 
-	return append([]byte(xml.Header), output...), nil
+	return append([]byte(XMLDeclaration), output...), nil
 }

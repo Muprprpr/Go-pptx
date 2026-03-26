@@ -33,7 +33,14 @@ func NewRelationship(rID, relType, targetURI string, isExternal bool, source *Pa
 		rel.target = &PackURI{uri: targetURI}
 	} else {
 		rel.targetMode = "Internal"
-		rel.target = NewPackURI(targetURI)
+		// 对于内部关系，需要基于源 URI 解析相对路径
+		if source != nil && !strings.HasPrefix(targetURI, "/") {
+			// 相对路径：使用 source 的目录来解析
+			rel.target = source.Join(targetURI)
+		} else {
+			// 绝对路径：直接创建
+			rel.target = NewPackURI(targetURI)
+		}
 	}
 
 	return rel
@@ -368,7 +375,11 @@ func (rs *Relationships) initRIDCounterLocked() {
 
 // ToXML 将关系集合序列化为XML
 func (rs *Relationships) ToXML() ([]byte, error) {
-	return xml.Marshal(rs)
+	output, err := xml.Marshal(rs)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(XMLDeclaration), output...), nil
 }
 
 // FromXML 从XML解析关系集合

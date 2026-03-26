@@ -193,7 +193,7 @@ func (p *Package) loadRelationships(zipReader *zip.Reader) error {
 			return fmt.Errorf("failed to parse relationships %s: %w", f.Name, err)
 		}
 
-		if sourceURI.IsPackageRels() {
+		if relURI.IsPackageRels() {
 			p.relationships = rels
 		} else {
 			part := p.parts.Get(sourceURI)
@@ -240,7 +240,7 @@ func (p *Package) CreatePartFromXML(uri *PackURI, contentType string, v interfac
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal XML: %w", err)
 	}
-	data = append([]byte(xml.Header), data...)
+	data = append([]byte(XMLDeclaration), data...)
 	return p.CreatePart(uri, contentType, data)
 }
 
@@ -431,6 +431,9 @@ func (p *Package) writeCoreProperties(zipWriter *zip.Writer) error {
 }
 
 func (p *Package) writeZipEntry(zipWriter *zip.Writer, path string, data []byte) error {
+	// 剥离前导斜杠，确保符合 ZIP 规范（Windows 和其他系统都要求）
+	path = strings.TrimPrefix(path, "/")
+
 	writer, err := zipWriter.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create zip entry %s: %w", path, err)

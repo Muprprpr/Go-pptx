@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 )
 
@@ -105,11 +106,13 @@ func NewStreamingZipWriter(w io.Writer) *StreamingZipWriter {
 
 // Create 创建 ZIP 条目并返回写入器
 func (sw *StreamingZipWriter) Create(path string) (io.Writer, error) {
+	path = strings.TrimPrefix(path, "/")
 	return sw.zipWriter.Create(path)
 }
 
 // WriteFromReader 从 Reader 流式写入 ZIP 条目
 func (sw *StreamingZipWriter) WriteFromReader(path string, reader io.Reader) error {
+	path = strings.TrimPrefix(path, "/")
 	w, err := sw.zipWriter.Create(path)
 	if err != nil {
 		return err
@@ -120,6 +123,7 @@ func (sw *StreamingZipWriter) WriteFromReader(path string, reader io.Reader) err
 
 // WriteFromStreamer 从 StreamWriter 流式写入 ZIP 条目
 func (sw *StreamingZipWriter) WriteFromStreamer(path string, streamer StreamWriter) error {
+	path = strings.TrimPrefix(path, "/")
 	w, err := sw.zipWriter.Create(path)
 	if err != nil {
 		return err
@@ -129,13 +133,14 @@ func (sw *StreamingZipWriter) WriteFromStreamer(path string, streamer StreamWrit
 
 // WriteFromXMLStreamer 从 XMLStreamer 流式写入 ZIP 条目
 func (sw *StreamingZipWriter) WriteFromXMLStreamer(path string, streamer XMLStreamer) error {
+	path = strings.TrimPrefix(path, "/")
 	w, err := sw.zipWriter.Create(path)
 	if err != nil {
 		return err
 	}
 
 	// 写入 XML 头
-	if _, err := w.Write([]byte(xml.Header)); err != nil {
+	if _, err := w.Write([]byte(XMLDeclaration)); err != nil {
 		return err
 	}
 
@@ -168,6 +173,7 @@ func (sw *StreamingZipWriter) WriteStreamPart(part *StreamPart) error {
 
 // WriteBytes 写入字节数据
 func (sw *StreamingZipWriter) WriteBytes(path string, data []byte) error {
+	path = strings.TrimPrefix(path, "/")
 	w, err := sw.zipWriter.Create(path)
 	if err != nil {
 		return err
@@ -178,12 +184,13 @@ func (sw *StreamingZipWriter) WriteBytes(path string, data []byte) error {
 
 // WriteXML 写入 XML 数据（自动添加 XML 头）
 func (sw *StreamingZipWriter) WriteXML(path string, data []byte) error {
+	path = strings.TrimPrefix(path, "/")
 	w, err := sw.zipWriter.Create(path)
 	if err != nil {
 		return err
 	}
 	// 写入 XML 头
-	if _, err := w.Write([]byte(xml.Header)); err != nil {
+	if _, err := w.Write([]byte(XMLDeclaration)); err != nil {
 		return err
 	}
 	_, err = w.Write(data)
@@ -762,9 +769,10 @@ func (c *ConcurrentZipCollector) collect() {
 
 // writePart 写入单个部件
 func (c *ConcurrentZipCollector) writePart(data *PartData) error {
-	w, err := c.zipWriter.Create(data.Path)
+	path := strings.TrimPrefix(data.Path, "/")
+	w, err := c.zipWriter.Create(path)
 	if err != nil {
-		return fmt.Errorf("failed to create zip entry %s: %w", data.Path, err)
+		return fmt.Errorf("failed to create zip entry %s: %w", path, err)
 	}
 
 	if data.Data != nil {
