@@ -475,7 +475,7 @@ func (p *Package) updateContentTypes() {
 
 // ===== 其他方法 =====
 
-// Clone 克隆整个包
+// Clone 克隆整个包（智能拷贝：静态资源 zero-copy，动态资源深拷贝）
 func (p *Package) Clone() *Package {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -483,7 +483,61 @@ func (p *Package) Clone() *Package {
 	newPkg := NewPackage()
 
 	for _, part := range p.parts.All() {
-		newPart := part.Clone()
+		var newPart *Part
+
+		// 根据内容类型选择拷贝策略
+		if IsImmutableContentType(part.ContentType()) {
+			// 不可变资源：使用 zero-copy
+			newPart = part.CloneShared()
+		} else {
+			// 可变资源：使用深拷贝
+			newPart = part.Clone()
+		}
+		_ = newPkg.parts.Add(newPart)
+	}
+
+	newPkg.relationships = p.relationships.Clone()
+
+	newPkg.contentTypes = &ContentTypes{
+		defaults:  make(map[string]string),
+		overrides: make(map[string]string),
+	}
+	for k, v := range p.contentTypes.Defaults() {
+		newPkg.contentTypes.AddDefault(k, v)
+	}
+	for k, v := range p.contentTypes.Overrides() {
+		newPkg.contentTypes.AddOverride(NewPackURI(k), v)
+	}
+
+	if p.coreProperties != nil {
+		newPkg.coreProperties = &CoreProperties{}
+		newPkg.coreProperties.SetTitle(p.coreProperties.Title())
+		newPkg.coreProperties.SetCreator(p.coreProperties.Creator())
+		newPkg.coreProperties.SetSubject(p.coreProperties.Subject())
+		newPkg.coreProperties.SetDescription(p.coreProperties.Description())
+		newPkg.coreProperties.SetKeywords(p.coreProperties.Keywords())
+		newPkg.coreProperties.SetCreated(p.coreProperties.Created())
+		newPkg.coreProperties.SetModified(p.coreProperties.Modified())
+		newPkg.coreProperties.SetLastModifiedBy(p.coreProperties.LastModifiedBy())
+		newPkg.coreProperties.SetRevision(p.coreProperties.Revision())
+		newPkg.coreProperties.SetCategory(p.coreProperties.Category())
+		newPkg.coreProperties.SetContentType(p.coreProperties.ContentType())
+		newPkg.coreProperties.SetLanguage(p.coreProperties.Language())
+	}
+
+	return newPkg
+}
+
+// CloneDeep 克隆整个包（完全深拷贝，不使用 zero-copy）
+// 用于需要完全独立副本的场景
+func (p *Package) CloneDeep() *Package {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	newPkg := NewPackage()
+
+	for _, part := range p.parts.All() {
+		newPart := part.Clone() // 全部使用深拷贝
 		_ = newPkg.parts.Add(newPart)
 	}
 

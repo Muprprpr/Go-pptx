@@ -11,9 +11,11 @@ import (
 type Part struct {
 	uri          *PackURI
 	contentType  string
-	blob         []byte
+	blob         []byte         // 独占的数据副本（可修改）
+	sharedBlob   []byte         // 共享的只读数据（zero-copy）
 	relationships *Relationships
-	dirty        bool // 是否被修改过
+	dirty        bool           // 是否被修改过
+	immutable    bool           // 标记是否为不可变资源（使用 sharedBlob）
 	mu           sync.RWMutex
 }
 
@@ -25,6 +27,20 @@ func NewPart(uri *PackURI, contentType string, blob []byte) *Part {
 		blob:         blob,
 		relationships: NewRelationships(uri),
 		dirty:        true,
+		immutable:    false,
+	}
+}
+
+// NewSharedPart 创建一个共享数据的部件（zero-copy，用于不可变资源）
+// 调用者必须保证 sharedBlob 在 Part 生命周期内不会被修改
+func NewSharedPart(uri *PackURI, contentType string, sharedBlob []byte) *Part {
+	return &Part{
+		uri:          uri,
+		contentType:  contentType,
+		sharedBlob:   sharedBlob,
+		relationships: NewRelationships(uri),
+		dirty:        false,
+		immutable:    true,
 	}
 }
 
@@ -56,16 +72,22 @@ func (p *Part) SetContentType(ct string) {
 }
 
 // Blob 返回原始内容
+// 对于不可变资源返回共享的只读切片，否则返回独立副本
 func (p *Part) Blob() []byte {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	if p.immutable && p.sharedBlob != nil {
+		return p.sharedBlob
+	}
 	return p.blob
 }
 
-// SetBlob 设置内容
+// SetBlob 设置内容（触发写时复制，解除共享）
 func (p *Part) SetBlob(blob []byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.sharedBlob = nil  // 解除共享引用
+	p.immutable = false // 标记为可变
 	p.blob = blob
 	p.dirty = true
 }
@@ -169,13 +191,20 @@ func (p *Part) RelationshipsURI() *PackURI {
 	return p.uri.RelationshipsURI()
 }
 
-// Clone 克隆部件
+// Clone 克隆部件（深拷贝，用于可变内容）
 func (p *Part) Clone() *Part {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	blobCopy := make([]byte, len(p.blob))
-	copy(blobCopy, p.blob)
+	var blobCopy []byte
+	if p.blob != nil {
+		blobCopy = make([]byte, len(p.blob))
+		copy(blobCopy, p.blob)
+	} else if p.sharedBlob != nil {
+		// 如果原来是共享的，深拷贝会创建独立副本
+		blobCopy = make([]byte, len(p.sharedBlob))
+		copy(blobCopy, p.sharedBlob)
+	}
 
 	return &Part{
 		uri:          p.uri.Clone(),
@@ -183,7 +212,46 @@ func (p *Part) Clone() *Part {
 		blob:         blobCopy,
 		relationships: p.relationships.Clone(),
 		dirty:        p.dirty,
+		immutable:    false, // 克隆后变为可变
 	}
+}
+
+// CloneShared 克隆部件（zero-copy，用于不可变资源）
+// 调用此方法的前提是 Part 的内容永远不会被修改
+func (p *Part) CloneShared() *Part {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// 确定要共享的数据源
+	var sharedData []byte
+	if p.sharedBlob != nil {
+		sharedData = p.sharedBlob
+	} else {
+		sharedData = p.blob
+	}
+
+	return &Part{
+		uri:          p.uri,              // PackURI 不可变，直接共享
+		contentType:  p.contentType,
+		sharedBlob:   sharedData,         // zero-copy！
+		relationships: p.relationships,    // 关系集合共享（不可变资源通常无关系）
+		dirty:        false,
+		immutable:    true,
+	}
+}
+
+// IsImmutable 返回是否为不可变资源
+func (p *Part) IsImmutable() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.immutable
+}
+
+// SetImmutable 设置为不可变资源
+func (p *Part) SetImmutable(immutable bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.immutable = immutable
 }
 
 // UnmarshalBlob 从 blob 解析 XML 内容到 v

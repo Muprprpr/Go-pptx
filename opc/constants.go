@@ -182,3 +182,71 @@ const (
 
 // XMLDeclaration OPC 包中所有 XML 文件的标准声明头
 const XMLDeclaration = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+
+// IsImmutableContentType 判断内容类型是否为不可变资源
+// 不可变资源可以使用 zero-copy 共享，无需深拷贝
+func IsImmutableContentType(contentType string) bool {
+	switch contentType {
+	// 图片类型 - 二进制数据，只读
+	case ContentTypePNG, ContentTypeJPEG, ContentTypeGIF,
+		ContentTypeBMP, ContentTypeTIFF, ContentTypeWMF,
+		ContentTypeEMF, ContentTypeSVG:
+		return true
+
+	// 音视频类型 - 二进制数据，只读
+	case ContentTypeWAV, ContentTypeMP3, ContentTypeMIDI,
+		ContentTypeMP4, ContentTypeAVI, ContentTypeWMV:
+		return true
+
+	// 主题和母版 - 模板文件，通常不变
+	case ContentTypeTheme, ContentTypeThemeOverride,
+		ContentTypeSlideMaster, ContentTypeSlideLayout:
+		return true
+
+	// 字体文件 - 只读
+	case ContentTypeFont:
+		return true
+
+	default:
+		return false
+	}
+}
+
+// IsLargeBinaryContentType 判断是否为大块二进制内容
+// 用于判断是否值得使用 zero-copy 优化
+func IsLargeBinaryContentType(contentType string) bool {
+	switch contentType {
+	case ContentTypePNG, ContentTypeJPEG, ContentTypeGIF,
+		ContentTypeBMP, ContentTypeTIFF, ContentTypeWMF,
+		ContentTypeEMF, ContentTypeSVG,
+		ContentTypeWAV, ContentTypeMP3, ContentTypeMIDI,
+		ContentTypeMP4, ContentTypeAVI, ContentTypeWMV,
+		ContentTypeFont:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsImageContentType 判断是否为图片内容类型
+func IsImageContentType(contentType string) bool {
+	switch contentType {
+	case ContentTypePNG, ContentTypeJPEG, ContentTypeGIF,
+		ContentTypeBMP, ContentTypeTIFF, ContentTypeWMF,
+		ContentTypeEMF, ContentTypeSVG:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsMediaContentType 判断是否为音视频内容类型
+func IsMediaContentType(contentType string) bool {
+	switch contentType {
+	case ContentTypeWAV, ContentTypeMP3, ContentTypeMIDI,
+		ContentTypeMP4, ContentTypeAVI, ContentTypeWMV:
+		return true
+	default:
+		return false
+	}
+}

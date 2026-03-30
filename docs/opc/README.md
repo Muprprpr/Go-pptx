@@ -182,6 +182,18 @@ func GetContentTypeByExtension(ext string) string
 func GetExtensionByContentType(contentType string) string
     GetExtensionByContentType 根据内容类型获取文件扩展名
 
+func IsImageContentType(contentType string) bool
+    IsImageContentType 判断是否为图片内容类型
+
+func IsImmutableContentType(contentType string) bool
+    IsImmutableContentType 判断内容类型是否为不可变资源 不可变资源可以使用 zero-copy 共享，无需深拷贝
+
+func IsLargeBinaryContentType(contentType string) bool
+    IsLargeBinaryContentType 判断是否为大块二进制内容 用于判断是否值得使用 zero-copy 优化
+
+func IsMediaContentType(contentType string) bool
+    IsMediaContentType 判断是否为音视频内容类型
+
 func IsValidPackURI(uri string) bool
     IsValidPackURI 检查 URI 是否有效
 
@@ -489,7 +501,10 @@ func (p *Package) AllParts() []*Part
     AllParts 返回所有部件
 
 func (p *Package) Clone() *Package
-    Clone 克隆整个包
+    Clone 克隆整个包（智能拷贝：静态资源 zero-copy，动态资源深拷贝） 对于不可变内容类型（图片、媒体、主题、母版等）使用 CloneShared 对于可变内容类型（幻灯片、演示文稿等）使用深拷贝
+
+func (p *Package) CloneDeep() *Package
+    CloneDeep 克隆整个包（完全深拷贝，不使用 zero-copy） 用于需要完全独立副本的场景
 
 func (p *Package) Close() error
     Close 关闭包，释放资源
@@ -566,22 +581,28 @@ func (p *Package) SetCoreProperties(props *CoreProperties)
 type Part struct {
 	// Has unexported fields.
 }
-    Part 表示包中的一个部件
+    Part 表示包中的一个部件 支持两种数据模式：独占模式（blob）和共享模式（sharedBlob） 共享模式用于不可变资源的 zero-copy 优化
 
 func NewPart(uri *PackURI, contentType string, blob []byte) *Part
-    NewPart 创建一个新的部件
+    NewPart 创建一个新的部件（独占数据模式）
 
 func NewPartFromReader(uri *PackURI, contentType string, r io.Reader) (*Part, error)
     NewPartFromReader 从Reader创建部件
+
+func NewSharedPart(uri *PackURI, contentType string, sharedBlob []byte) *Part
+    NewSharedPart 创建一个共享数据的部件（zero-copy，用于不可变资源） 调用者必须保证 sharedBlob 在 Part 生命周期内不会被修改
 
 func (p *Part) AddRelationship(relType, targetURI string, isExternal bool) (*Relationship, error)
     AddRelationship 添加一个关系
 
 func (p *Part) Blob() []byte
-    Blob 返回原始内容
+    Blob 返回原始内容 对于不可变资源返回共享的只读切片，否则返回独立副本
 
 func (p *Part) Clone() *Part
-    Clone 克隆部件
+    Clone 克隆部件（深拷贝，用于可变内容） 如果原来是共享的，会创建独立副本
+
+func (p *Part) CloneShared() *Part
+    CloneShared 克隆部件（zero-copy，用于不可变资源） 调用此方法的前提是 Part 的内容永远不会被修改
 
 func (p *Part) ContentType() string
     ContentType 返回内容类型
@@ -594,6 +615,9 @@ func (p *Part) HasRelationships() bool
 
 func (p *Part) IsDirty() bool
     IsDirty 返回是否被修改
+
+func (p *Part) IsImmutable() bool
+    IsImmutable 返回是否为不可变资源
 
 func (p *Part) LoadRelationships(data []byte) error
     LoadRelationships 从XML加载关系
@@ -630,6 +654,9 @@ func (p *Part) SetContentType(ct string)
 
 func (p *Part) SetDirty(dirty bool)
     SetDirty 设置修改标记
+
+func (p *Part) SetImmutable(immutable bool)
+    SetImmutable 设置为不可变资源
 
 func (p *Part) Size() int
     Size 返回内容大小
@@ -881,10 +908,36 @@ type ResourceDedupPool struct {
     ResourceDedupPool 全局资源去重池 使用 sync.Map 实现并发安全的资源去重
 
 func GetGlobalResourcePool() *ResourceDedupPool
-    GetGlobalResourcePool 获取全局资源池
+    GetGlobalResourcePool 获取全局资源池（注意：这是去重池，不是共享池）
 
 func NewResourceDedupPool() *ResourceDedupPool
     NewResourceDedupPool 创建新的资源去重池
+
+type ResourcePool struct {
+	// Has unexported fields.
+}
+    ResourcePool 全局资源池，管理可共享的静态资源 使用 zero-copy 策略，多个 Package 可以共享相同的二进制数据 支持引用计数，用于追踪资源使用情况
+
+func GetGlobalPool() *ResourcePool
+    GetGlobalPool 获取全局资源池
+
+func (p *ResourcePool) CreateSharedPart(uri *PackURI, contentType string, loader func() ([]byte, error)) (*Part, error)
+    CreateSharedPart 从资源池创建共享部件 如果资源不在池中，会使用 loader 加载
+
+func (p *ResourcePool) GetOrLoad(uri string, contentType string, loader func() ([]byte, error)) ([]byte, error)
+    GetOrLoad 获取或加载资源（全局唯一实例，zero-copy） loader 函数仅在资源不存在时调用一次
+
+func (p *ResourcePool) Prefetch(resources map[string]func() ([]byte, error)) error
+    Prefetch 预加载资源到池中 用于提前加载已知会使用的资源，避免运行时加载延迟
+
+func (p *ResourcePool) Release(uri string)
+    Release 释放资源引用（引用计数减一） 当引用计数归零时，资源会被移除
+
+func (p *ResourcePool) ReleaseAll()
+    ReleaseAll 释放所有资源（慎用！）
+
+func (p *ResourcePool) Stats() map[string]int
+    Stats 返回资源池统计信息 返回 themes, masters, layouts, media, fonts, total 的计数
 
 func (p *ResourceDedupPool) Clear()
     Clear 清空资源池
