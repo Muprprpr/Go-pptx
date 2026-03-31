@@ -1,3 +1,9 @@
+# OPC 包文档
+
+> **[功能审查报告](./REVIEW.md)** - 查看 OPC 层的完整功能审查结果
+
+---
+
 package opc // import "github.com/Muprprpr/Go-pptx/opc"
 
 Package opc 提供 OOXML Open Packaging Convention (OPC) 的 Go 实现 用于处理 PPTX 等 Office
