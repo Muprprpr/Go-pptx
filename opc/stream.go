@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ===== 数据源接口和实现 =====
@@ -104,16 +105,33 @@ func NewStreamingZipWriter(w io.Writer) *StreamingZipWriter {
 	}
 }
 
+// createZipHeader 创建 ZIP 文件头，使用正确的时间戳和兼容性设置
+func (sw *StreamingZipWriter) createZipHeader(path string) *zip.FileHeader {
+	// 剥离前导斜杠，确保符合 ZIP 规范
+	path = strings.TrimPrefix(path, "/")
+
+	header := &zip.FileHeader{
+		Name:     path,
+		Modified: time.Now(), // 设置当前时间戳
+		Method:   zip.Deflate,
+	}
+
+	// UTF-8 文件名标记
+	header.Flags |= 0x800
+
+	return header
+}
+
 // Create 创建 ZIP 条目并返回写入器
 func (sw *StreamingZipWriter) Create(path string) (io.Writer, error) {
-	path = strings.TrimPrefix(path, "/")
-	return sw.zipWriter.Create(path)
+	header := sw.createZipHeader(path)
+	return sw.zipWriter.CreateHeader(header)
 }
 
 // WriteFromReader 从 Reader 流式写入 ZIP 条目
 func (sw *StreamingZipWriter) WriteFromReader(path string, reader io.Reader) error {
-	path = strings.TrimPrefix(path, "/")
-	w, err := sw.zipWriter.Create(path)
+	header := sw.createZipHeader(path)
+	w, err := sw.zipWriter.CreateHeader(header)
 	if err != nil {
 		return err
 	}
@@ -123,8 +141,8 @@ func (sw *StreamingZipWriter) WriteFromReader(path string, reader io.Reader) err
 
 // WriteFromStreamer 从 StreamWriter 流式写入 ZIP 条目
 func (sw *StreamingZipWriter) WriteFromStreamer(path string, streamer StreamWriter) error {
-	path = strings.TrimPrefix(path, "/")
-	w, err := sw.zipWriter.Create(path)
+	header := sw.createZipHeader(path)
+	w, err := sw.zipWriter.CreateHeader(header)
 	if err != nil {
 		return err
 	}
@@ -133,8 +151,8 @@ func (sw *StreamingZipWriter) WriteFromStreamer(path string, streamer StreamWrit
 
 // WriteFromXMLStreamer 从 XMLStreamer 流式写入 ZIP 条目
 func (sw *StreamingZipWriter) WriteFromXMLStreamer(path string, streamer XMLStreamer) error {
-	path = strings.TrimPrefix(path, "/")
-	w, err := sw.zipWriter.Create(path)
+	header := sw.createZipHeader(path)
+	w, err := sw.zipWriter.CreateHeader(header)
 	if err != nil {
 		return err
 	}
@@ -154,7 +172,8 @@ func (sw *StreamingZipWriter) WriteFromXMLStreamer(path string, streamer XMLStre
 // WriteStreamPart 流式写入 StreamPart
 func (sw *StreamingZipWriter) WriteStreamPart(part *StreamPart) error {
 	path := part.PartURI().MemberName()
-	w, err := sw.zipWriter.Create(path)
+	header := sw.createZipHeader(path)
+	w, err := sw.zipWriter.CreateHeader(header)
 	if err != nil {
 		return err
 	}
@@ -173,8 +192,8 @@ func (sw *StreamingZipWriter) WriteStreamPart(part *StreamPart) error {
 
 // WriteBytes 写入字节数据
 func (sw *StreamingZipWriter) WriteBytes(path string, data []byte) error {
-	path = strings.TrimPrefix(path, "/")
-	w, err := sw.zipWriter.Create(path)
+	header := sw.createZipHeader(path)
+	w, err := sw.zipWriter.CreateHeader(header)
 	if err != nil {
 		return err
 	}
@@ -184,8 +203,8 @@ func (sw *StreamingZipWriter) WriteBytes(path string, data []byte) error {
 
 // WriteXML 写入 XML 数据（自动添加 XML 头）
 func (sw *StreamingZipWriter) WriteXML(path string, data []byte) error {
-	path = strings.TrimPrefix(path, "/")
-	w, err := sw.zipWriter.Create(path)
+	header := sw.createZipHeader(path)
+	w, err := sw.zipWriter.CreateHeader(header)
 	if err != nil {
 		return err
 	}
@@ -770,7 +789,16 @@ func (c *ConcurrentZipCollector) collect() {
 // writePart 写入单个部件
 func (c *ConcurrentZipCollector) writePart(data *PartData) error {
 	path := strings.TrimPrefix(data.Path, "/")
-	w, err := c.zipWriter.Create(path)
+
+	// 使用 FileHeader 设置正确的时间戳
+	header := &zip.FileHeader{
+		Name:     path,
+		Modified: time.Now(),
+		Method:   zip.Deflate,
+	}
+	header.Flags |= 0x800 // UTF-8 file name flag
+
+	w, err := c.zipWriter.CreateHeader(header)
 	if err != nil {
 		return fmt.Errorf("failed to create zip entry %s: %w", path, err)
 	}

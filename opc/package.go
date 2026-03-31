@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Package 表示一个 OPC 包（如 PPTX 文件）
@@ -437,12 +438,9 @@ func (p *Package) writeCoreProperties(zipWriter *zip.Writer) error {
 }
 
 func (p *Package) writeZipEntry(zipWriter *zip.Writer, path string, data []byte) error {
-	// 剥离前导斜杠，确保符合 ZIP 规范（Windows 和其他系统都要求）
-	path = strings.TrimPrefix(path, "/")
-
-	writer, err := zipWriter.Create(path)
+	writer, err := createZipEntry(zipWriter, path, len(data))
 	if err != nil {
-		return fmt.Errorf("failed to create zip entry %s: %w", path, err)
+		return err
 	}
 
 	_, err = writer.Write(data)
@@ -451,6 +449,37 @@ func (p *Package) writeZipEntry(zipWriter *zip.Writer, path string, data []byte)
 	}
 
 	return nil
+}
+
+// createZipEntry 创建一个 ZIP 条目，使用正确的时间戳和兼容性设置
+// 这是一个内部方法，确保所有 ZIP 条目都以统一、安全的方式创建
+func createZipEntry(zipWriter *zip.Writer, path string, size int) (io.Writer, error) {
+	// 1. 剥离前导斜杠，确保符合 ZIP 规范
+	// ZIP 内部路径是相对路径，绝对不能有前导斜杠
+	path = strings.TrimPrefix(path, "/")
+
+	// 2. 精密构建 FileHeader
+	header := &zip.FileHeader{
+		Name:               path,
+		UncompressedSize:   uint32(size),
+		UncompressedSize64: uint64(size),
+		Modified:           time.Now(), // 设置当前时间戳（解决 Windows 资源管理器 MS-DOS 时间解析 bug）
+	}
+
+	// 3. 设置压缩方法（Deflate 用于文本文件，Store 用于已压缩文件）
+	header.Method = zip.Deflate
+
+	// 4. 增强兼容性标记
+	// - 使用 UTF-8 编码文件名（Bit 11）
+	// - 这对于包含非 ASCII 字符的文件名很重要
+	header.Flags |= 0x800 // UTF-8 file name flag
+
+	writer, err := zipWriter.CreateHeader(header)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create zip entry %s: %w", path, err)
+	}
+
+	return writer, nil
 }
 
 func (p *Package) relFilePath(uri *PackURI) string {

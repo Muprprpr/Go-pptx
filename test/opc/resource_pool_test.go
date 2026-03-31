@@ -1,7 +1,10 @@
 package opc_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"testing"
+	"time"
 
 	"github.com/Muprprpr/Go-pptx/opc"
 )
@@ -220,4 +223,139 @@ func TestPackage_Clone_SmartCloning(t *testing.T) {
 	}
 
 	t.Log("Package Clone smart cloning test passed")
+}
+
+// TestZipEntry_Timestamp 测试 ZIP 条目的时间戳是否正确设置
+// 验证：
+// 1. 时间戳不为零值（解决 Windows 资源管理器 MS-DOS 时间 bug）
+// 2. 时间戳是当前时间（允许几秒误差）
+// 3. 时间戳可以正确转换为北京时间（UTC+8）
+func TestZipEntry_Timestamp(t *testing.T) {
+	// 记录创建前的时间（北京时间）
+	beijingLoc, _ := time.LoadLocation("Asia/Shanghai")
+	beforeCreate := time.Now().In(beijingLoc)
+
+	// 创建一个简单的 Package
+	pkg := opc.NewPackage()
+
+	// 添加一个部件
+	slideURI := opc.NewPackURI("/ppt/slides/slide1.xml")
+	pkg.CreatePart(slideURI, opc.ContentTypeSlide, []byte("<slide/>"))
+
+	// 添加关系
+	pkg.AddRelationship(opc.RelTypeOfficeDocument, "/ppt/presentation.xml", false)
+
+	// 保存到字节数组
+	data, err := pkg.SaveToBytes()
+	if err != nil {
+		t.Fatalf("SaveToBytes failed: %v", err)
+	}
+
+	// 记录创建后的时间
+	afterCreate := time.Now().In(beijingLoc)
+
+	// 读取 ZIP 文件并检查时间戳
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("Failed to read ZIP: %v", err)
+	}
+
+	// 检查每个文件的时间戳
+	for _, file := range reader.File {
+		modTime := file.Modified
+
+		// 1. 时间戳不应为零值
+		if modTime.IsZero() {
+			t.Errorf("File %s has zero modification time", file.Name)
+			continue
+		}
+
+		// 2. 时间戳应在 beforeCreate 和 afterCreate 之间（允许 1 秒误差）
+		modTimeUTC := modTime.UTC()
+		beforeUTC := beforeCreate.UTC()
+		afterUTC := afterCreate.UTC()
+
+		if modTimeUTC.Before(beforeUTC.Add(-1 * time.Second)) {
+			t.Errorf("File %s modification time %v is before creation time %v",
+				file.Name, modTimeUTC, beforeUTC)
+		}
+		if modTimeUTC.After(afterUTC.Add(1 * time.Second)) {
+			t.Errorf("File %s modification time %v is after creation time %v",
+				file.Name, modTimeUTC, afterUTC)
+		}
+
+		// 3. 转换为北京时间并验证
+		modTimeBeijing := modTime.In(beijingLoc)
+
+		// 验证北京时间与 UTC 时间差为 8 小时（或根据夏令时调整）
+		_, beijingOffset := modTimeBeijing.Zone()
+		expectedOffset := 8 * 60 * 60 // 8 小时（秒）
+		if beijingOffset != expectedOffset {
+			t.Logf("Warning: Beijing offset is %d seconds, expected %d (may vary by DST)",
+				beijingOffset, expectedOffset)
+		}
+
+		t.Logf("File: %s", file.Name)
+		t.Logf("  UTC Time:   %v", modTimeUTC.Format("2006-01-02 15:04:05 MST"))
+		t.Logf("  Beijing:    %v", modTimeBeijing.Format("2006-01-02 15:04:05 MST"))
+		t.Logf("  Unix:       %d", modTime.Unix())
+	}
+
+	t.Log("ZIP entry timestamp test passed")
+}
+
+// TestZipEntry_TimestampNotZero 专门测试时间戳不为零
+// 这是解决 Windows 资源管理器 MS-DOS 时间解析 bug 的关键测试
+func TestZipEntry_TimestampNotZero(t *testing.T) {
+	pkg := opc.NewPackage()
+
+	// 添加多个不同类型的部件
+	testParts := []struct {
+		uri         string
+		contentType string
+		data        []byte
+	}{
+		{"/ppt/slides/slide1.xml", opc.ContentTypeSlide, []byte("<slide/>")},
+		{"/ppt/media/image1.png", opc.ContentTypePNG, []byte{0x89, 0x50, 0x4E, 0x47}},
+		{"/docProps/core.xml", opc.ContentTypeCoreProperties, []byte("<coreProperties/>")},
+	}
+
+	for _, tp := range testParts {
+		uri := opc.NewPackURI(tp.uri)
+		pkg.CreatePart(uri, tp.contentType, tp.data)
+	}
+
+	// 保存
+	data, err := pkg.SaveToBytes()
+	if err != nil {
+		t.Fatalf("SaveToBytes failed: %v", err)
+	}
+
+	// 读取并验证
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("Failed to read ZIP: %v", err)
+	}
+
+	zeroTimeCount := 0
+	validTimeCount := 0
+
+	for _, file := range reader.File {
+		if file.Modified.IsZero() {
+			zeroTimeCount++
+			t.Errorf("File %s has zero modification time (will cause Explorer bug)", file.Name)
+		} else {
+			validTimeCount++
+		}
+	}
+
+	if zeroTimeCount > 0 {
+		t.Errorf("Found %d files with zero timestamp (Windows Explorer bug risk)", zeroTimeCount)
+	}
+
+	t.Logf("Valid timestamps: %d, Zero timestamps: %d", validTimeCount, zeroTimeCount)
+
+	if zeroTimeCount == 0 {
+		t.Log("All ZIP entries have valid timestamps - Windows Explorer compatible")
+	}
 }
