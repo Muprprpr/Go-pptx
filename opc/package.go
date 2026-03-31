@@ -133,17 +133,20 @@ func (p *Package) loadContentTypes(zipReader *zip.Reader) error {
 
 func (p *Package) loadParts(zipReader *zip.Reader) error {
 	for _, f := range zipReader.File {
-		if f.Name == PathContentTypes {
+		// 规范化路径：处理 Windows 斜杠问题
+		normalizedName := NormalizeZipPath(f.Name)
+
+		if normalizedName == PathContentTypes {
 			continue
 		}
-		if strings.Contains(f.Name, PathRelsDir+"/") && strings.HasSuffix(f.Name, ".rels") {
+		if strings.Contains(normalizedName, PathRelsDir+"/") && strings.HasSuffix(normalizedName, ".rels") {
 			continue
 		}
-		if strings.HasSuffix(f.Name, "/") {
+		if strings.HasSuffix(normalizedName, "/") {
 			continue
 		}
 
-		uri := NewPackURI("/" + f.Name)
+		uri := NewPackURI("/" + normalizedName)
 
 		rc, err := f.Open()
 		if err != nil {
@@ -170,22 +173,25 @@ func (p *Package) loadParts(zipReader *zip.Reader) error {
 
 func (p *Package) loadRelationships(zipReader *zip.Reader) error {
 	for _, f := range zipReader.File {
-		if !strings.Contains(f.Name, PathRelsDir+"/") || !strings.HasSuffix(f.Name, ".rels") {
+		// 规范化路径
+		normalizedName := NormalizeZipPath(f.Name)
+
+		if !strings.Contains(normalizedName, PathRelsDir+"/") || !strings.HasSuffix(normalizedName, ".rels") {
 			continue
 		}
 
 		rc, err := f.Open()
 		if err != nil {
-			return fmt.Errorf("failed to open %s: %w", f.Name, err)
+			return fmt.Errorf("failed to open %s: %w", normalizedName, err)
 		}
 
 		data, err := io.ReadAll(rc)
 		rc.Close()
 		if err != nil {
-			return fmt.Errorf("failed to read %s: %w", f.Name, err)
+			return fmt.Errorf("failed to read %s: %w", normalizedName, err)
 		}
 
-		relURI := NewPackURI("/" + f.Name)
+		relURI := NewPackURI("/" + normalizedName)
 		sourceURI := relURI.SourceURI()
 
 		rels := NewRelationships(sourceURI)

@@ -114,7 +114,9 @@ func OpenStreamFromReader(r io.ReaderAt, size int64) (*StreamPackage, error) {
 // loadContentTypes 加载内容类型（必须立即加载）
 func (p *StreamPackage) loadContentTypes() error {
 	for _, f := range p.zipReader.File {
-		if f.Name == PathContentTypes {
+		// 规范化路径
+		normalizedName := NormalizeZipPath(f.Name)
+		if normalizedName == PathContentTypes {
 			rc, err := f.Open()
 			if err != nil {
 				return err
@@ -133,18 +135,21 @@ func (p *StreamPackage) loadContentTypes() error {
 // loadPartMetadata 只加载部件元数据，不加载内容
 func (p *StreamPackage) loadPartMetadata() error {
 	for _, f := range p.zipReader.File {
+		// 规范化路径
+		normalizedName := NormalizeZipPath(f.Name)
+
 		// 跳过特殊文件
-		if f.Name == PathContentTypes {
+		if normalizedName == PathContentTypes {
 			continue
 		}
-		if strings.Contains(f.Name, PathRelsDir+"/") && strings.HasSuffix(f.Name, ".rels") {
+		if strings.Contains(normalizedName, PathRelsDir+"/") && strings.HasSuffix(normalizedName, ".rels") {
 			continue
 		}
-		if strings.HasSuffix(f.Name, "/") {
+		if normalizedName == "" || strings.HasSuffix(normalizedName, "/") {
 			continue
 		}
 
-		uri := NewPackURI("/" + f.Name)
+		uri := NewPackURI("/" + normalizedName)
 		contentType := p.contentTypes.GetContentType(uri)
 
 		// 创建流式部件，使用 ZipFileSource 实现懒加载
@@ -160,7 +165,10 @@ func (p *StreamPackage) loadPartMetadata() error {
 // loadRelationships 加载所有关系
 func (p *StreamPackage) loadRelationships() error {
 	for _, f := range p.zipReader.File {
-		if !strings.Contains(f.Name, PathRelsDir+"/") || !strings.HasSuffix(f.Name, ".rels") {
+		// 规范化路径
+		normalizedName := NormalizeZipPath(f.Name)
+
+		if !strings.Contains(normalizedName, PathRelsDir+"/") || !strings.HasSuffix(normalizedName, ".rels") {
 			continue
 		}
 
@@ -174,7 +182,7 @@ func (p *StreamPackage) loadRelationships() error {
 			return err
 		}
 
-		relURI := NewPackURI("/" + f.Name)
+		relURI := NewPackURI("/" + normalizedName)
 		sourceURI := relURI.SourceURI()
 
 		rels := NewRelationships(sourceURI)

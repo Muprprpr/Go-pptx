@@ -314,3 +314,27 @@ func NormalizeURI(uri string) string {
 
 	return uri
 }
+
+// NormalizeZipPath 规范化 ZIP 内部路径
+// 专门用于处理从 ZIP 文件读取的路径，解决 Windows 斜杠问题
+// 与 NormalizeURI 的区别：不添加前导 /，保持相对路径形式
+func NormalizeZipPath(path string) string {
+	// 1. 将 Windows 反斜杠转换为正斜杠
+	// ZIP 规范要求使用正斜杠，但某些工具可能在 Windows 上创建了反斜杠路径
+	path = strings.ReplaceAll(path, "\\", "/")
+
+	// 2. 移除重复的斜杠（如 // 或 ///）
+	for strings.Contains(path, "//") {
+		path = strings.ReplaceAll(path, "//", "/")
+	}
+
+	// 3. 移除前导斜杠（ZIP 内部路径是相对的）
+	path = strings.TrimPrefix(path, "/")
+
+	// 4. 移除结尾的斜杠（除非是空路径）
+	if len(path) > 0 && strings.HasSuffix(path, "/") {
+		path = strings.TrimSuffix(path, "/")
+	}
+
+	return path
+}
