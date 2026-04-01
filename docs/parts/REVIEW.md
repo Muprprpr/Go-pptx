@@ -65,7 +65,29 @@
 
 **注意**： 关系管理逻辑已移至 `opc` 层的 `opc.Relationships`，此模块仅保留 XML DTO 用于 .rels 文件的读写。
 
-## 6. CoreProps 模块 (coreprops.go)
+## 6. Theme 模块 (theme.go, theme_types.go, theme_default.go)
+**核心职责**: 主题模板管理（最小化处理）
+
+| 类型/函数 | 说明 |
+| ---------- | ------ |
+| ThemePart | 主题部件，对应 /ppt/theme/themeN.xml |
+| XTheme, XThemeElements | 主题 XML 结构 |
+| XColorScheme, XColorVariant | 颜色方案 |
+| XFontScheme, XFontCollection | 字体方案 |
+| XFmtScheme | 格式方案（通过 InnerXML 保留原始数据） |
+| DefaultThemeXML | 完整的 Office 主题模板常量 |
+| DefaultTheme() | 获取默认主题（单例懒加载） |
+| CloneTheme() | 克隆主题（深拷贝） |
+| GetThemeColor/GetThemeColorRGB/GetThemeColorType | 颜色访问方法 |
+| SetThemeColorRGB/SetThemeColorSystem | 颜色设置方法 |
+| SetThemeMajorFont/SetThemeMinorFont/SetThemeScriptFont | 字体设置方法 |
+
+**设计原则**：
+1. **预留入口，非主要依据**：提供了颜色/字体的读写方法，但主题复杂度高，不建议深度定制
+2. **模板优先**：通过 `DefaultThemeXML`（完整 Office 主题）+ `CloneTheme()` 保证生成的 PPTX 结构完整
+3. **数据保留**：FmtScheme 使用 `InnerXML` 保留原始 XML，避免解析丢失
+
+## 7. CoreProps 模块 (coreprops.go)
 **核心职责**: 核心属性
 
 | 类型/函数 | 说明 |
@@ -118,13 +140,13 @@
 │  └──────────────┘  └──────────────┘  └──────────────┘     │
 │                                                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │    Media     │  │ Relationship │  │  CoreProps   │     │
-│  │  媒体资源    │  │   XML DTO    │  │  核心属性    │     │
+│  │    Theme     │  │    Media     │  │ Relationship │     │
+│  │  主题模板    │  │  媒体资源    │  │   XML DTO    │     │
 │  └──────────────┘  └──────────────┘  └──────────────┘     │
 │                                                            │
 │  ┌──────────────┐  ┌──────────────┐                       │
-│  │   XMLUtils   │  │ XMLWriter    │                       │
-│  │  XML 工具    │  │  流式写入    │                       │
+│  │  CoreProps   │  │   XMLUtils   │                       │
+│  │  核心属性    │  │  XML 工具    │                       │
 │  └──────────────┘  └──────────────┘                       │
 │                                                            │
 └─────────────────────────────────────────────────────────────┘
@@ -144,6 +166,9 @@
 |------|------|----------|
 | slide.go | ~1700 | SlidePart、XMLWriter、WriteXML 方法 |
 | slide_types.go | ~450 | XML 结构类型定义 |
+| theme.go | ~490 | ThemePart、主题读写方法 |
+| theme_types.go | ~180 | 主题 XML 结构类型 |
+| theme_default.go | ~260 | 默认主题模板、CloneTheme |
 | media_manager.go | 460 | MediaManager 媒体管理器 |
 | presentation.go | 393 | PresentationPart |
 | master_parser.go | 344 | 母版/版式解析器 |
