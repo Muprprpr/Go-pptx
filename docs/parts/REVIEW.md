@@ -87,7 +87,25 @@
 2. **模板优先**：通过 `DefaultThemeXML`（完整 Office 主题）+ `CloneTheme()` 保证生成的 PPTX 结构完整
 3. **数据保留**：FmtScheme 使用 `InnerXML` 保留原始 XML，避免解析丢失
 
-## 7. CoreProps 模块 (coreprops.go)
+## 7. AppProps 模块 (appprops.go, appprops_types.go)
+**核心职责**: 应用程序属性（公司、管理者等）
+
+| 类型/函数 | 说明 |
+| ---------- | ------ |
+| AppPropsPart | 应用程序属性部件，对应 /docProps/app.xml |
+| XMLAppProps | 应用属性 XML 结构 |
+| GetAppCompany/SetAppCompany | 公司名称读写 |
+| GetAppManager/SetAppManager | 管理者读写 |
+| GetAppSlideCount/SetAppSlideCount | 幻灯片数量读写 |
+| SetAppWordCount/SetAppTotalTime | 字数/编辑时间设置 |
+| HeadingPairs/TitlesOfParts | 标题对/部件标题（InnerXML 保留） |
+
+**设计说明**：
+- OOXML 规定公司、管理者等元数据必须写在 `/docProps/app.xml`
+- 方法统一使用 `App` 前缀避免与 Go 原生关键字冲突
+- HeadingPairs 和 TitlesOfParts 使用 InnerXML 保留原始结构，避免复杂解析
+
+## 8. CoreProps 模块 (coreprops.go)
 **核心职责**: 核心属性
 
 | 类型/函数 | 说明 |
@@ -144,10 +162,10 @@
 │  │  主题模板    │  │  媒体资源    │  │   XML DTO    │     │
 │  └──────────────┘  └──────────────┘  └──────────────┘     │
 │                                                            │
-│  ┌──────────────┐  ┌──────────────┐                       │
-│  │  CoreProps   │  │   XMLUtils   │                       │
-│  │  核心属性    │  │  XML 工具    │                       │
-│  └──────────────┘  └──────────────┘                       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │  CoreProps   │  │     App      │  │   XMLUtils   │     │
+│  │  核心属性    │  │  应用属性    │  │  XML 工具    │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
 │                                                            │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -169,6 +187,8 @@
 | theme.go | ~490 | ThemePart、主题读写方法 |
 | theme_types.go | ~180 | 主题 XML 结构类型 |
 | theme_default.go | ~260 | 默认主题模板、CloneTheme |
+| appprops.go | ~270 | AppPropsPart、应用属性读写方法 |
+| appprops_types.go | ~100 | 应用属性 XML 结构类型 |
 | media_manager.go | 460 | MediaManager 媒体管理器 |
 | presentation.go | 393 | PresentationPart |
 | master_parser.go | 344 | 母版/版式解析器 |
