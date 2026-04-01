@@ -114,7 +114,54 @@
 | XMLW3CDTFDate | W3CDTF 日期格式 |
 | ParseCoreProperties() | 解析核心属性 |
 
-## 7. XML 工具模块 (xmlutils.go)
+## 9. Chart 模块 (chart.go, chart_types.go)
+**核心职责**: 图表部件（模板 + 占位符策略）
+
+| 类型/函数 | 说明 |
+| ---------- | ------ |
+| ChartPart | 图表部件，对应 /ppt/charts/chartN.xml |
+| ChartType | 图表类型枚举（Bar/Pie/Line/Area/Scatter/Doughnut） |
+| ChartTemplateBar/Pie/Line... | 预定义图表模板常量 |
+| SetTemplate/SetRawXML | 设置图表模板/原始 XML |
+| ReplacePlaceholder | 替换单个占位符 |
+| ReplacePlaceholders | 批量替换占位符 |
+| SetExternalDataRID/GetExternalDataRID | 外部 Excel 数据引用 |
+| HasExternalData | 检查是否有外部数据引用 |
+
+**设计策略**：
+- **模板 + 占位符**：不尝试用 Go Struct 映射复杂图表 XML（几百种元素组合）
+- **预定义模板**：提供常见图表类型（柱状图、饼图、折线图等）
+- **占位符替换**：`{{CHART_TITLE}}`、`{{CATEGORIES}}`、`{{SERIES_VALUES}}` 等
+- **两种路线**：
+  - 路线 C（无 Excel）：数据直接嵌入 `strCache`/`numCache`，无外部依赖
+  - 路线 A/B（有 Excel）：通过 `externalData` 引用嵌入的 Excel 文件
+
+**常用占位符**：
+| 占位符 | 说明 |
+|--------|------|
+| `{{CHART_TITLE}}` | 图表标题 |
+| `{{SERIES_NAME}}` | 系列名称 |
+| `{{CATEGORIES}}` | 分类标签 XML 片段 |
+| `{{SERIES_VALUES}}` | 数值 XML 片段 |
+| `{{CAT_COUNT}}` | 分类数量 |
+| `{{CAT_COUNT_PLUS_1}}` | 分类数量+1（用于 Excel 公式） |
+
+## 10. Embedding 模块 (embedding.go)
+**核心职责**: 嵌入数据部件
+
+| 类型/函数 | 说明 |
+| ---------- | ------ |
+| EmbeddingPart | 嵌入部件，对应 /ppt/embeddings/*.xlsx |
+| EmbeddingType | 嵌入类型枚举（Excel/Word/Other） |
+| Data/SetData | 二进制数据读写 |
+| SetDataReader | 从 Reader 设置数据 |
+| DetectEmbeddingType | 从文件名检测类型 |
+
+**设计说明**：
+- 嵌入数据是二进制文件（如 Excel），不进行 XML 解析
+- 提供 Reader/Writer 接口便于流式处理
+
+## 11. XML 工具模块 (xmlutils.go)
 **核心职责**: XML 处理工具
 
 | 函数/常量 | 说明 |
@@ -122,7 +169,7 @@
 | XMLDeclaration | XML 声明头常量 |
 | StripNamespacePrefixes() | 去除命名空间前缀 |
 
-## 8. XML Master Models (xml_master_models.go)
+## 12. XML Master Models (xml_master_models.go)
 **核心职责**: 母版/版式 XML 解析用到的中间结构
 
 | 类型 | 说明 |
@@ -189,6 +236,9 @@
 | theme_default.go | ~260 | 默认主题模板、CloneTheme |
 | appprops.go | ~270 | AppPropsPart、应用属性读写方法 |
 | appprops_types.go | ~100 | 应用属性 XML 结构类型 |
+| chart.go | ~130 | ChartPart、图表读写方法 |
+| chart_types.go | ~120 | 图表 XML 结构类型 |
+| embedding.go | ~130 | EmbeddingPart、嵌入数据读写 |
 | media_manager.go | 460 | MediaManager 媒体管理器 |
 | presentation.go | 393 | PresentationPart |
 | master_parser.go | 344 | 母版/版式解析器 |
