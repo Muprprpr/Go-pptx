@@ -159,10 +159,20 @@ func (rs *XMLRelationships) ToXML() ([]byte, error) {
 	return append([]byte(XMLDeclaration), output...), nil
 }
 
+// FromXML 从 XML 字节反序列化关系集合
+// 统一命名规范，与其他 Part 保持一致
+func (rs *XMLRelationships) FromXML(data []byte) error {
+	if err := xml.Unmarshal(data, rs); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ParseRelationships 从 XML 字节解析关系集合
+// 这是创建新实例的便捷方法
 func ParseRelationships(data []byte) (*XMLRelationships, error) {
 	var rs XMLRelationships
-	if err := xml.Unmarshal(data, &rs); err != nil {
+	if err := rs.FromXML(data); err != nil {
 		return nil, err
 	}
 	return &rs, nil

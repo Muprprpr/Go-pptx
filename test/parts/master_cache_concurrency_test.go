@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Muprprpr/Go-pptx/parts"
+	"github.com/Muprprpr/Go-pptx/slide"
 )
 
 // ============================================================================
@@ -14,7 +15,7 @@ import (
 
 func TestMasterCache_ConcurrentRead(t *testing.T) {
 	// 从真实文件初始化缓存
-	cache := parts.NewMasterCache()
+	cache := slide.NewMasterCache()
 	masters, layouts := loadTestMasterData()
 	cache.Init(masters, layouts)
 
@@ -71,7 +72,7 @@ func TestMasterCache_ConcurrentRead(t *testing.T) {
 // ============================================================================
 
 func TestMasterCache_HighConcurrency(t *testing.T) {
-	cache := parts.NewMasterCache()
+	cache := slide.NewMasterCache()
 	masters, layouts := loadTestMasterData()
 	cache.Init(masters, layouts)
 

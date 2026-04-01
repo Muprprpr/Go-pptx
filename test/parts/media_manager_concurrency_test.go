@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Muprprpr/Go-pptx/parts"
+	"github.com/Muprprpr/Go-pptx/slide"
 )
 
 // ============================================================================
@@ -14,7 +14,7 @@ import (
 // ============================================================================
 
 func TestMediaManager_Concurrency(t *testing.T) {
-	mgr := parts.NewMediaManager()
+	mgr := slide.NewMediaManager()
 	const goroutines = 100
 	const opsPerGoroutine = 50
 
@@ -72,7 +72,7 @@ func TestMediaManager_Concurrency(t *testing.T) {
 // ============================================================================
 
 func TestMediaManager_ConcurrentReadWrite(t *testing.T) {
-	mgr := parts.NewMediaManager()
+	mgr := slide.NewMediaManager()
 	const writers = 20
 	const readers = 80
 	const iterations = 100
@@ -115,7 +115,7 @@ func TestMediaManager_ConcurrentReadWrite(t *testing.T) {
 // ============================================================================
 
 func TestMediaManager_ConcurrentCount(t *testing.T) {
-	mgr := parts.NewMediaManager()
+	mgr := slide.NewMediaManager()
 	const ops = 1000
 
 	var wg sync.WaitGroup

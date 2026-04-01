@@ -116,7 +116,7 @@ func (s *SlidePart) FromXML(data []byte) error
 ```
 
 > **注意**:
-> - `ToXML` 使用 `ToXMLFast()` 进行高效序列化，输出带命名空间前缀的标准 OOXML 格式
+> - `ToXML` 使用 `XMLWriterPool` 进行高效序列化，输出带命名空间前缀的标准 OOXML 格式
 > - `FromXML` 内部自动调用 `StripNamespacePrefixes` 处理命名空间问题。详见 [xmlutils.md](xmlutils.md)
 
 ---
@@ -247,7 +247,6 @@ func (a *ShapeIDAllocatorSync) ResetFrom(startID uint32)
 ```go
 func NewXSpTree() *XSpTree
 func (xst *XSpTree) WriteXML(xw *XMLWriter) error
-func (xst *XSpTree) ToXMLFast() ([]byte, error)
 ```
 
 ### XSp
@@ -256,7 +255,6 @@ func (xst *XSpTree) ToXMLFast() ([]byte, error)
 
 ```go
 func (xs *XSp) WriteXML(xw *XMLWriter) error
-func (xs *XSp) ToXMLFast() ([]byte, error)
 ```
 
 ### XPicture
@@ -265,7 +263,6 @@ func (xs *XSp) ToXMLFast() ([]byte, error)
 
 ```go
 func (xp *XPicture) WriteXML(xw *XMLWriter) error
-func (xp *XPicture) ToXMLFast() ([]byte, error)
 ```
 
 ### XGraphicFrame
@@ -274,7 +271,6 @@ func (xp *XPicture) ToXMLFast() ([]byte, error)
 
 ```go
 func (xgf *XGraphicFrame) WriteXML(xw *XMLWriter) error
-func (xgf *XGraphicFrame) ToXMLFast() ([]byte, error)
 ```
 
 ### XTextBody
@@ -283,7 +279,6 @@ func (xgf *XGraphicFrame) ToXMLFast() ([]byte, error)
 
 ```go
 func (xtb *XTextBody) WriteXML(xw *XMLWriter) error
-func (xtb *XTextBody) ToXMLFast() ([]byte, error)
 ```
 
 ### XTextParagraph
@@ -292,7 +287,6 @@ func (xtb *XTextBody) ToXMLFast() ([]byte, error)
 
 ```go
 func (xtp *XTextParagraph) WriteXML(xw *XMLWriter) error
-func (xtp *XTextParagraph) ToXMLFast() ([]byte, error)
 ```
 
 ### XTextRun
@@ -301,7 +295,6 @@ func (xtp *XTextParagraph) ToXMLFast() ([]byte, error)
 
 ```go
 func (xtr *XTextRun) WriteXML(xw *XMLWriter) error
-func (xtr *XTextRun) ToXMLFast() ([]byte, error)
 ```
 
 ### XTable
@@ -310,7 +303,6 @@ func (xtr *XTextRun) ToXMLFast() ([]byte, error)
 
 ```go
 func (xt *XTable) WriteXML(xw *XMLWriter) error
-func (xt *XTable) ToXMLFast() ([]byte, error)
 ```
 
 ### XTableRow
@@ -319,7 +311,6 @@ func (xt *XTable) ToXMLFast() ([]byte, error)
 
 ```go
 func (xtr *XTableRow) WriteXML(xw *XMLWriter) error
-func (xtr *XTableRow) ToXMLFast() ([]byte, error)
 ```
 
 ### XTableCell
@@ -328,7 +319,6 @@ func (xtr *XTableRow) ToXMLFast() ([]byte, error)
 
 ```go
 func (xtc *XTableCell) WriteXML(xw *XMLWriter) error
-func (xtc *XTableCell) ToXMLFast() ([]byte, error)
 ```
 
 ### XTransform2D
@@ -337,7 +327,6 @@ func (xtc *XTableCell) ToXMLFast() ([]byte, error)
 
 ```go
 func (xt *XTransform2D) WriteXML(xw *XMLWriter) error
-func (xt *XTransform2D) ToXMLFast() ([]byte, error)
 ```
 
 ### XSlide
@@ -346,7 +335,6 @@ func (xt *XTransform2D) ToXMLFast() ([]byte, error)
 
 ```go
 func (xs *XSlide) WriteXML(xw *XMLWriter) error
-func (xs *XSlide) ToXMLFast() ([]byte, error)
 ```
 
 ### XCSld
@@ -406,7 +394,6 @@ if xs.CSld != nil && xs.CSld.SpTree != nil {
 
 ```go
 func (xbfp *XBlipFillProperties) WriteXML(xw *XMLWriter) error
-func (xbfp *XBlipFillProperties) ToXMLFast() ([]byte, error)
 ```
 
 ### XBlip
@@ -448,7 +435,6 @@ func (xbfp *XBlipFillProperties) ToXMLFast() ([]byte, error)
 
 ```go
 func (xsr *XSlideRelationships) WriteXML(xw *XMLWriter) error
-func (xsr *XSlideRelationships) ToXMLFast() ([]byte, error)
 ```
 
 ---

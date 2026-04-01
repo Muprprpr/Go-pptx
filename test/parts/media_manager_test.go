@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Muprprpr/Go-pptx/parts"
+	"github.com/Muprprpr/Go-pptx/slide"
 )
 
 // ============================================================================
@@ -12,7 +13,7 @@ import (
 
 func TestMediaManager_AddAndGet(t *testing.T) {
 	// 初始化空的 MediaManager
-	mgr := parts.NewMediaManager()
+	mgr := slide.NewMediaManager()
 
 	// 添加图片
 	rID1, img := mgr.AddMediaAuto("logo.png", []byte("fake_image_data"))
@@ -61,7 +62,7 @@ func TestMediaManager_AddAndGet(t *testing.T) {
 // ============================================================================
 
 func TestMediaManager_ContentTypeInference(t *testing.T) {
-	mgr := parts.NewMediaManager()
+	mgr := slide.NewMediaManager()
 
 	tests := []struct {
 		fileName        string
@@ -103,7 +104,7 @@ func TestMediaManager_ContentTypeInference(t *testing.T) {
 // ============================================================================
 
 func TestMediaManager_GetByIndex(t *testing.T) {
-	mgr := parts.NewMediaManager()
+	mgr := slide.NewMediaManager()
 
 	// 添加媒体
 	mgr.AddMediaAuto("logo.png", []byte("img_data"))
@@ -151,7 +152,7 @@ func TestMediaManager_GetByIndex(t *testing.T) {
 
 func TestMediaManager_RemoveAndClear(t *testing.T) {
 	t.Run("RemoveMedia", func(t *testing.T) {
-		mgr := parts.NewMediaManager()
+		mgr := slide.NewMediaManager()
 		mgr.AddMediaAuto("test.png", []byte("data"))
 
 		if !mgr.RemoveMedia("rId1") {
@@ -166,7 +167,7 @@ func TestMediaManager_RemoveAndClear(t *testing.T) {
 	})
 
 	t.Run("Clear", func(t *testing.T) {
-		mgr := parts.NewMediaManager()
+		mgr := slide.NewMediaManager()
 		mgr.AddMediaAuto("a.png", []byte("a"))
 		mgr.AddMediaAuto("b.mp3", []byte("b"))
 		mgr.AddMediaAuto("c.mp4", []byte("c"))

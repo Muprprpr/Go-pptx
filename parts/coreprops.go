@@ -134,10 +134,20 @@ func (cp *XMLCoreProperties) ToXML() ([]byte, error) {
 	return append([]byte(XMLDeclaration), output...), nil
 }
 
+// FromXML 从 XML 字节反序列化核心属性
+// 统一命名规范，与其他 Part 保持一致
+func (cp *XMLCoreProperties) FromXML(data []byte) error {
+	if err := xml.Unmarshal(data, cp); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ParseCoreProperties 从 XML 字节解析核心属性
+// 这是创建新实例的便捷方法
 func ParseCoreProperties(data []byte) (*XMLCoreProperties, error) {
 	var cp XMLCoreProperties
-	if err := xml.Unmarshal(data, &cp); err != nil {
+	if err := cp.FromXML(data); err != nil {
 		return nil, err
 	}
 	return &cp, nil
@@ -145,6 +155,7 @@ func ParseCoreProperties(data []byte) (*XMLCoreProperties, error) {
 
 // ParseCoreProps 是 ParseCoreProperties 的简写别名
 // 提供更简洁的调用方式
+// Deprecated: 建议使用 ParseCoreProperties 或 FromXML
 func ParseCoreProps(data []byte) (*XMLCoreProperties, error) {
 	return ParseCoreProperties(data)
 }

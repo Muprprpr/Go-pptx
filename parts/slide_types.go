@@ -31,8 +31,8 @@ type SlidePart struct {
 	// 因为单个 Slide 由单 goroutine 负责生成）
 	nextShapeID uint32
 
-	// 页面级 Relationship 管理
-	relMgr *SlideRelationships
+	// 页面级 Relationship 管理（使用 opc 层通用实现）
+	rels *opc.Relationships
 
 	mu sync.RWMutex
 }
@@ -94,22 +94,6 @@ type SlideLayoutPart struct {
 	spTree *XSpTree
 
 	mu sync.RWMutex
-}
-
-// ============================================================================
-// SlideRelationships 页面级 Relationship 管理
-// ============================================================================
-
-// SlideRelationships 页面级 Relationship 管理
-// 维护本页面引用的图片、图表、布局等 rId 映射
-type SlideRelationships struct {
-	nextRId      int               // 下一个可分配的 rId（全局递增）
-	imageRels    map[string]string // rId -> 目标 URI (图片)
-	layoutRId    string            // 布局 rId
-	masterRId    string            // 母版 rId
-	mediaRels    map[string]string // rId -> 目标 URI (媒体)
-	chartRels    map[string]string // rId -> 目标 URI (图表)
-	tableRels    map[string]string // rId -> 目标 URI (表格)
 }
 
 // ============================================================================
@@ -424,20 +408,6 @@ type XTableCell struct {
 	RowSpan   int         `xml:"rowSpan,attr,omitempty"`
 	Vertical  string      `xml:"anchor,attr,omitempty"`
 	TextBody  *XTextBody  `xml:"txBody,omitempty"`
-}
-
-// XRelation 关系
-type XRelation struct {
-	ID     string `xml:"Id,attr"`
-	Type   string `xml:"Type,attr"`
-	Target string `xml:"Target,attr"`
-}
-
-// XSlideRelationships 幻灯片关系
-type XSlideRelationships struct {
-	XMLName struct{}     `xml:"Relationships"`
-	Xmlns   string       `xml:"xmlns,attr"`
-	Rels    []XRelation  `xml:"Relationship"`
 }
 
 // ============================================================================

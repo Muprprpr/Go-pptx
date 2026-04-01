@@ -6,21 +6,47 @@ import (
 	"testing"
 
 	"github.com/Muprprpr/Go-pptx/parts"
+	"github.com/Muprprpr/Go-pptx/slide"
 )
+
+// writeSlideToXML 辅助函数：使用 XMLWriter 序列化 XSlide
+func writeSlideToXML(xs *parts.XSlide) ([]byte, error) {
+	xw := parts.NewXMLWriterBuffered(4096)
+	if err := xw.Declaration(); err != nil {
+		return nil, err
+	}
+	if err := xs.WriteXML(xw); err != nil {
+		return nil, err
+	}
+	return xw.Bytes(), nil
+}
+
+// writeTextBodyToXML 辅助函数：使用 XMLWriter 序列化 XTextBody
+func writeTextBodyToXML(xtb *parts.XTextBody) ([]byte, error) {
+	xw := parts.NewXMLWriterBuffered(4096)
+	if err := xw.Declaration(); err != nil {
+		return nil, err
+	}
+	if err := xtb.WriteXML(xw); err != nil {
+		return nil, err
+	}
+	return xw.Bytes(), nil
+}
 
 // TestSlideBuilder_AddText 测试 Slide Builder API 的文本添加逻辑
 // 不涉及 XML 序列化，直接断言 Go 结构体
 func TestSlideBuilder_AddText(t *testing.T) {
 	// 实例化一个空白的 SlidePart 对象
-	slide := parts.NewSlidePart(1)
-	if slide == nil {
+	slidePart := parts.NewSlidePart(1)
+	if slidePart == nil {
 		t.Fatal("NewSlidePart 返回 nil")
 	}
 
-	// 调用 AddTextBox 方法添加文本
+	// 使用 slide.Builder 添加文本
 	testText := "测试标题"
 	x, y, cx, cy := 914400, 457200, 9144000, 1143000 // EMU 单位
-	sp := slide.AddTextBox(x, y, cx, cy, testText)
+	builder := slide.NewSlideBuilder(slidePart)
+	sp := builder.AddTextBox(x, y, cx, cy, testText)
 
 	// 断言返回的形状不为 nil（证明 ShapeTree 成功增加了一个形状）
 	if sp == nil {
@@ -52,14 +78,15 @@ func TestSlideBuilder_AddText(t *testing.T) {
 
 // TestSlideBuilder_AddTextBox_Multiple 测试添加多个文本框
 func TestSlideBuilder_AddTextBox_Multiple(t *testing.T) {
-	slide := parts.NewSlidePart(1)
+	slidePart := parts.NewSlidePart(1)
+	builder := slide.NewSlideBuilder(slidePart)
 
 	// 添加多个文本框并收集返回的形状指针
 	texts := []string{"标题文本", "正文段落1", "正文段落2"}
 	var shapes []*parts.XSp
 	for i, text := range texts {
 		y := 457200 + i*914400 // 递增 Y 坐标
-		sp := slide.AddTextBox(914400, y, 9144000, 457200, text)
+		sp := builder.AddTextBox(914400, y, 9144000, 457200, text)
 		if sp == nil {
 			t.Fatalf("第 %d 个 AddTextBox 返回 nil", i+1)
 		}
@@ -92,11 +119,12 @@ func TestSlideBuilder_AddTextBox_Multiple(t *testing.T) {
 
 // TestSlideBuilder_AddTextBox_VerifyStructure 测试 AddTextBox 创建的完整结构
 func TestSlideBuilder_AddTextBox_VerifyStructure(t *testing.T) {
-	slide := parts.NewSlidePart(1)
+	slidePart := parts.NewSlidePart(1)
+	builder := slide.NewSlideBuilder(slidePart)
 
 	testText := "完整结构测试"
 	x, y, cx, cy := 1000000, 2000000, 3000000, 4000000
-	sp := slide.AddTextBox(x, y, cx, cy, testText)
+	sp := builder.AddTextBox(x, y, cx, cy, testText)
 
 	// 验证形状的非视觉属性
 	if sp.NonVisual.CNvPr == nil {
@@ -327,10 +355,10 @@ func TestSlide_MarshalFullPage(t *testing.T) {
 		},
 	}
 
-	// 使用 ToXMLFast 进行序列化（生成带命名空间前缀的 OOXML 格式）
-	data, err := xslide.ToXMLFast()
+	// 使用 WriteXML 进行序列化（生成带命名空间前缀的 OOXML 格式）
+	data, err := writeSlideToXML(&xslide)
 	if err != nil {
-		t.Fatalf("ToXMLFast 失败: %v", err)
+		t.Fatalf("WriteXML 失败: %v", err)
 	}
 
 	xmlStr := string(data)
@@ -381,10 +409,10 @@ func TestSlide_MarshalFullPage_WithContent(t *testing.T) {
 		},
 	}
 
-	// 使用 ToXMLFast 进行序列化（生成带命名空间前缀的 OOXML 格式）
-	data, err := textBody.ToXMLFast()
+	// 使用 WriteXML 进行序列化（生成带命名空间前缀的 OOXML 格式）
+	data, err := writeTextBodyToXML(&textBody)
 	if err != nil {
-		t.Fatalf("ToXMLFast 失败: %v", err)
+		t.Fatalf("WriteXML 失败: %v", err)
 	}
 
 	xmlStr := string(data)

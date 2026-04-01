@@ -8,6 +8,7 @@ import (
 
 	"github.com/Muprprpr/Go-pptx/opc"
 	"github.com/Muprprpr/Go-pptx/parts"
+	"github.com/Muprprpr/Go-pptx/slide"
 )
 
 // ============================================================================
@@ -99,7 +100,8 @@ func TestBlankPresentation_Hardcore(t *testing.T) {
 
 	// --- 5. 创建幻灯片并关联 Layout ---
 	slidePart := parts.NewSlidePart(1)
-	slidePart.AddTextBox(914400, 457200, 4572000, 457200, "Hello from Go Engine!")
+	builder := slide.NewSlideBuilder(slidePart)
+	builder.AddTextBox(914400, 457200, 4572000, 457200, "Hello from Go Engine!")
 	slideXML, _ := slidePart.ToXML()
 
 	slidePartOp, _ := pkg.CreatePart(

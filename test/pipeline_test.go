@@ -8,6 +8,7 @@ import (
 
 	"github.com/Muprprpr/Go-pptx/opc"
 	"github.com/Muprprpr/Go-pptx/parts"
+	"github.com/Muprprpr/Go-pptx/slide"
 )
 
 // ============================================================================
@@ -170,9 +171,10 @@ func TestParts_CreateAndSerialize(t *testing.T) {
 	// 3.1 创建新的 PresentationPart
 	pres := parts.NewPresentationPart()
 
-	// 3.2 创建新的 SlidePart
-	slide := parts.NewSlidePart(1)
-	slide.AddTextBox(914400, 457200, 4572000, 457200, "Hello from Go Engine!")
+	// 3.2 创建新的 SlidePart 并使用 Builder 添加文本
+	slidePart := parts.NewSlidePart(1)
+	builder := slide.NewSlideBuilder(slidePart)
+	builder.AddTextBox(914400, 457200, 4572000, 457200, "Hello from Go Engine!")
 
 	// 3.3 序列化 PresentationPart
 	presXML, err := pres.ToXML()
@@ -187,7 +189,7 @@ func TestParts_CreateAndSerialize(t *testing.T) {
 	}
 
 	// 3.4 序列化 SlidePart
-	slideXML, err := slide.ToXML()
+	slideXML, err := slidePart.ToXML()
 	if err != nil {
 		t.Fatalf("SlidePart.ToXML 失败: %v", err)
 	}
@@ -225,9 +227,10 @@ func TestOPC_WriteAndRoute(t *testing.T) {
 	}
 
 	// 4.3 创建 SlidePart
-	slide := parts.NewSlidePart(1)
-	slide.AddTextBox(914400, 457200, 4572000, 457200, "Hello from OPC!")
-	slideXML, _ := slide.ToXML()
+	slidePart4 := parts.NewSlidePart(1)
+	slideBuilder4 := slide.NewSlideBuilder(slidePart4)
+	slideBuilder4.AddTextBox(914400, 457200, 4572000, 457200, "Hello from OPC!")
+	slideXML, _ := slidePart4.ToXML()
 	slidePart, err := pkg.CreatePart(
 		opc.NewPackURI("/ppt/slides/slide1.xml"),
 		"application/vnd.openxmlformats-officedocument.presentationml.slide+xml",
@@ -333,25 +336,26 @@ func TestParts_Update(t *testing.T) {
 		t.Fatal("缺少 slide1.xml")
 	}
 
-	slide := parts.NewSlidePart(1)
-	if err := slide.FromXML(slidePart.Blob()); err != nil {
+	slidePart5 := parts.NewSlidePart(1)
+	if err := slidePart5.FromXML(slidePart.Blob()); err != nil {
 		t.Fatalf("SlidePart.FromXML 失败: %v", err)
 	}
 
-	originalShapeCount := slide.ShapeIDCount()
+	originalShapeCount := slidePart5.ShapeIDCount()
 	t.Logf("Stage 5: 原始形状数量 = %d", originalShapeCount)
 
 	// 5.3 添加新文本框
-	slide.AddTextBox(1000000, 1000000, 2000000, 500000, "Updated Text!")
+	slideBuilder5 := slide.NewSlideBuilder(slidePart5)
+	slideBuilder5.AddTextBox(1000000, 1000000, 2000000, 500000, "Updated Text!")
 
-	newShapeCount := slide.ShapeIDCount()
+	newShapeCount := slidePart5.ShapeIDCount()
 	if newShapeCount <= originalShapeCount {
 		t.Error("添加形状后数量未增加")
 	}
 	t.Logf("Stage 5: 更新后形状数量 = %d", newShapeCount)
 
 	// 5.4 重新序列化
-	newXML, err := slide.ToXML()
+	newXML, err := slidePart5.ToXML()
 	if err != nil {
 		t.Fatalf("SlidePart.ToXML 失败: %v", err)
 	}
@@ -398,9 +402,10 @@ func TestOPC_SecurePackaging(t *testing.T) {
 	_ = string(originalSlidePart.Blob()) // 原始内容，用于验证
 
 	// 6.3 修改 SlidePart
-	slide := parts.NewSlidePart(1)
-	slide.AddTextBox(1000000, 1000000, 2000000, 500000, "Modified Content!")
-	newSlideXML, _ := slide.ToXML()
+	slide6 := parts.NewSlidePart(1)
+	slideBuilder6 := slide.NewSlideBuilder(slide6)
+	slideBuilder6.AddTextBox(1000000, 1000000, 2000000, 500000, "Modified Content!")
+	newSlideXML, _ := slide6.ToXML()
 
 	newSlidePart := opc.NewPart(
 		opc.NewPackURI("/ppt/slides/slide1.xml"),
@@ -484,9 +489,10 @@ func TestPipeline_FullIntegration(t *testing.T) {
 
 	// Stage 3: 创建
 	t.Log("----- Stage 3: Parts 创建与序列化 -----")
-	newSlide := parts.NewSlidePart(1)
-	newSlide.AddTextBox(914400, 457200, 4572000, 457200, "Integration Test!")
-	newSlideXML, err := newSlide.ToXML()
+	newSlidePart3 := parts.NewSlidePart(1)
+	newSlidePart3Builder := slide.NewSlideBuilder(newSlidePart3)
+	newSlidePart3Builder.AddTextBox(914400, 457200, 4572000, 457200, "Integration Test!")
+	newSlideXML, err := newSlidePart3.ToXML()
 	if err != nil {
 		t.Fatalf("Stage 3 序列化失败: %v", err)
 	}
@@ -525,7 +531,8 @@ func TestPipeline_FullIntegration(t *testing.T) {
 	t.Log("----- Stage 5: Parts 数据更新 -----")
 	updatedPkg, _ := opc.OpenFile(outputPath)
 	updatedSlide := parts.NewSlidePart(1)
-	updatedSlide.AddTextBox(500000, 500000, 3000000, 300000, "Updated via Stage 5!")
+	updatedSlideBuilder := slide.NewSlideBuilder(updatedSlide)
+	updatedSlideBuilder.AddTextBox(500000, 500000, 3000000, 300000, "Updated via Stage 5!")
 	updatedXML, _ := updatedSlide.ToXML()
 	updatedPkg.RemovePart(opc.NewPackURI("/ppt/slides/slide1.xml"))
 	updatedPkg.CreatePart(

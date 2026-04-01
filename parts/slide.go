@@ -262,21 +262,22 @@ func (s *SlidePart) ShapeIDCount() uint32 {
 
 // NewSlidePart 创建新的幻灯片部件
 func NewSlidePart(id int) *SlidePart {
+	uri := opc.NewPackURI(fmt.Sprintf("/ppt/slides/slide%d.xml", id))
 	return &SlidePart{
-		uri:           opc.NewPackURI(fmt.Sprintf("/ppt/slides/slide%d.xml", id)),
-		spTree:        NewXSpTree(),
-		nextShapeID:   2, // 1 已被 spTree 自身使用
-		relMgr:        NewSlideRelationships(),
+		uri:         uri,
+		spTree:      NewXSpTree(),
+		nextShapeID: 2, // 1 已被 spTree 自身使用
+		rels:        opc.NewRelationships(uri),
 	}
 }
 
 // NewSlidePartWithURI 使用指定 URI 创建幻灯片部件
 func NewSlidePartWithURI(uri *opc.PackURI) *SlidePart {
 	return &SlidePart{
-		uri:           uri,
-		spTree:        NewXSpTree(),
-		nextShapeID:   2,
-		relMgr:        NewSlideRelationships(),
+		uri:         uri,
+		spTree:      NewXSpTree(),
+		nextShapeID: 2,
+		rels:        opc.NewRelationships(uri),
 	}
 }
 
@@ -320,32 +321,25 @@ func (s *SlidePart) SetMasterRId(rId string) {
 	s.masterRId = rId
 }
 
-// Relationships 返回幻灯片关系管理器
-func (s *SlidePart) Relationships() *SlideRelationships {
+// Relationships 返回幻灯片关系管理器（使用 opc.Relationships）
+func (s *SlidePart) Relationships() *opc.Relationships {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.relMgr
+	return s.rels
 }
 
-// AddImage 添加图片并返回 rId
-func (s *SlidePart) AddImage(targetURI string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.relMgr.AddImageRel(targetURI)
+// SpTree 返回形状树（用于高层构建器操作）
+func (s *SlidePart) SpTree() *XSpTree {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.spTree
 }
 
-// AddMedia 添加媒体并返回 rId
-func (s *SlidePart) AddMedia(targetURI string) string {
+// AppendShapeChild 向形状树添加子元素（用于高层构建器操作）
+func (s *SlidePart) AppendShapeChild(child any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.relMgr.AddMediaRel(targetURI)
-}
-
-// AddChart 添加图表并返回 rId
-func (s *SlidePart) AddChart(targetURI string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.relMgr.AddChartRel(targetURI)
+	s.spTree.Children = append(s.spTree.Children, child)
 }
 
 // NewXSpTree 创建新的形状树
@@ -361,14 +355,8 @@ func NewXSpTree() *XSpTree {
 	}
 }
 
-// AddShape 添加形状到幻灯片
-func (s *SlidePart) AddShape(shape any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.spTree.Children = append(s.spTree.Children, shape)
-}
-
 // ToXML 将 SlidePart 序列化为 XML
+// 使用 XMLWriterPool 统一序列化底座
 func (s *SlidePart) ToXML() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -385,8 +373,18 @@ func (s *SlidePart) ToXML() ([]byte, error) {
 		},
 	}
 
-	// 使用 ToXMLFast 方法正确序列化 Children
-	return xs.ToXMLFast()
+	// 使用 XMLWriterPool 统一序列化
+	xw := globalXMLWriterPool.Get()
+	defer globalXMLWriterPool.Put(xw)
+
+	xw.ResetBuffer()
+	if err := xw.Declaration(); err != nil {
+		return nil, err
+	}
+	if err := xs.WriteXML(xw); err != nil {
+		return nil, err
+	}
+	return xw.Bytes(), nil
 }
 
 // FromXML 从 XML 反序列化为 SlidePart
@@ -454,470 +452,85 @@ func (s *SlideLayoutPart) SetMasterRId(rId string) {
 	s.masterRId = rId
 }
 
-// NewSlideRelationships 创建新的幻灯片关系管理器
-func NewSlideRelationships() *SlideRelationships {
-	return &SlideRelationships{
-		nextRId:   1,
-		imageRels: make(map[string]string),
-		mediaRels: make(map[string]string),
-		chartRels: make(map[string]string),
-		tableRels: make(map[string]string),
-	}
-}
-
-// allocateRId 分配一个新的全局唯一 rId
-func (sr *SlideRelationships) allocateRId() string {
-	rId := fmt.Sprintf("rId%d", sr.nextRId)
-	sr.nextRId++
-	return rId
-}
-
-// AddImageRel 添加图片关系，返回分配的 rId
-func (sr *SlideRelationships) AddImageRel(targetURI string) string {
-	for rId, uri := range sr.imageRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	rId := sr.allocateRId()
-	sr.imageRels[rId] = targetURI
-	return rId
-}
-
-// AddMediaRel 添加媒体关系，返回分配的 rId
-func (sr *SlideRelationships) AddMediaRel(targetURI string) string {
-	for rId, uri := range sr.mediaRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	rId := sr.allocateRId()
-	sr.mediaRels[rId] = targetURI
-	return rId
-}
-
-// AddChartRel 添加图表关系，返回分配的 rId
-func (sr *SlideRelationships) AddChartRel(targetURI string) string {
-	for rId, uri := range sr.chartRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	rId := sr.allocateRId()
-	sr.chartRels[rId] = targetURI
-	return rId
-}
-
-// AddTableRel 添加表格关系，返回分配的 rId
-func (sr *SlideRelationships) AddTableRel(targetURI string) string {
-	for rId, uri := range sr.tableRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	rId := sr.allocateRId()
-	sr.tableRels[rId] = targetURI
-	return rId
-}
-
-// ImageRels 返回所有图片关系
-func (sr *SlideRelationships) ImageRels() map[string]string {
-	return sr.imageRels
-}
-
-// MediaRels 返回所有媒体关系
-func (sr *SlideRelationships) MediaRels() map[string]string {
-	return sr.mediaRels
-}
-
-// ChartRels 返回所有图表关系
-func (sr *SlideRelationships) ChartRels() map[string]string {
-	return sr.chartRels
-}
-
-// TableRels 返回所有表格关系
-func (sr *SlideRelationships) TableRels() map[string]string {
-	return sr.tableRels
-}
-
-// LayoutRId 返回布局 rId
-func (sr *SlideRelationships) LayoutRId() string {
-	return sr.layoutRId
-}
-
-// SetLayoutRId 设置布局 rId
-func (sr *SlideRelationships) SetLayoutRId(rId string) {
-	sr.layoutRId = rId
-}
-
-// MasterRId 返回母版 rId
-func (sr *SlideRelationships) MasterRId() string {
-	return sr.masterRId
-}
-
-// SetMasterRId 设置母版 rId
-func (sr *SlideRelationships) SetMasterRId(rId string) {
-	sr.masterRId = rId
-}
-
-// GetImageRelByURI 根据 URI 查找图片 rId
-func (sr *SlideRelationships) GetImageRelByURI(targetURI string) string {
-	for rId, uri := range sr.imageRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	return ""
-}
-
-// GetMediaRelByURI 根据 URI 查找媒体 rId
-func (sr *SlideRelationships) GetMediaRelByURI(targetURI string) string {
-	for rId, uri := range sr.mediaRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	return ""
-}
-
-// RelationshipCount 返回关系总数
-func (sr *SlideRelationships) RelationshipCount() int {
-	return len(sr.imageRels) + len(sr.mediaRels) + len(sr.chartRels)
-}
-
-// Shape 管理功能
-
-// allocateShapeID 分配一个新的 shape ID（局部自增，非并发安全）
-func (s *SlidePart) allocateShapeID() uint32 {
-	s.nextShapeID++
-	return s.nextShapeID
-}
-
-// AddTextBox 添加文本框到幻灯片
-// x, y, cx, cy: 位置和尺寸（EMU 单位）
-// text: 文本内容
-func (s *SlidePart) AddTextBox(x, y, cx, cy int, text string) *XSp {
+// AddImageRel 添加图片关系（带去重）
+// 返回分配的 rId
+func (s *SlidePart) AddImageRel(targetURI string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	shapeID := s.allocateShapeID()
+	target := opc.NewPackURI(targetURI)
 
-	sp := &XSp{
-		NonVisual: XNonVisualDrawingShape{
-			CNvPr: &XNvCxnSpPr{
-				ID:   int(shapeID),
-				Name: fmt.Sprintf("TextBox %d", shapeID),
-			},
-			CNvSpPr: &XNvSpPr{},
-		},
-		ShapeProperties: &XShapeProperties{
-			Transform2D: &XTransform2D{
-				Offset: &XOv2DrOffset{X: x, Y: y},
-				Extent: &XOv2DrExtent{Cx: cx, Cy: cy},
-			},
-		},
-		TextBody: &XTextBody{
-			BodyPr: &XBodyPr{},
-			LstStyle: &XTextParagraphList{},
-			Paragraphs: []XTextParagraph{
-				{
-					TextRuns: []XTextRun{
-						{Text: text},
-					},
-				},
-			},
-		},
+	// 去重检查：如果已存在相同目标的关系，复用其 rId
+	if existing := s.rels.GetByTarget(target); existing != nil {
+		return existing.RID()
 	}
 
-	s.spTree.Children = append(s.spTree.Children, sp)
-	return sp
+	// 创建新关系
+	rel, err := s.rels.AddNew(RelTypeImage, targetURI, false)
+	if err != nil {
+		return ""
+	}
+	return rel.RID()
 }
 
-// AddShape 添加形状到幻灯片
-// presetID: 预设形状类型 (如 "rectangle", "ellipse", "roundRect" 等)
-func (s *SlidePart) AddAutoShape(x, y, cx, cy int, presetID string) *XSp {
+// AddMediaRel 添加媒体关系（带去重）
+// 返回分配的 rId
+func (s *SlidePart) AddMediaRel(targetURI string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	shapeID := s.allocateShapeID()
+	target := opc.NewPackURI(targetURI)
 
-	sp := &XSp{
-		NonVisual: XNonVisualDrawingShape{
-			CNvPr: &XNvCxnSpPr{
-				ID:   int(shapeID),
-				Name: fmt.Sprintf("%s %d", presetID, shapeID),
-			},
-			CNvSpPr: &XNvSpPr{},
-		},
-		ShapeProperties: &XShapeProperties{
-			Transform2D: &XTransform2D{
-				Offset: &XOv2DrOffset{X: x, Y: y},
-				Extent: &XOv2DrExtent{Cx: cx, Cy: cy},
-			},
-		},
-		ShapePreset: presetID,
+	// 去重检查
+	if existing := s.rels.GetByTarget(target); existing != nil {
+		return existing.RID()
 	}
 
-	s.spTree.Children = append(s.spTree.Children, sp)
-	return sp
+	rel, err := s.rels.AddNew(RelTypeMedia, targetURI, false)
+	if err != nil {
+		return ""
+	}
+	return rel.RID()
 }
 
-// AddPicture 添加图片到幻灯片
-// x, y, cx, cy: 位置和尺寸（EMU 单位）
-// imageRId: 图片关系 ID
-func (s *SlidePart) AddPicture(x, y, cx, cy int, imageRId string) *XPicture {
+// AddChartRel 添加图表关系（带去重）
+// 返回分配的 rId
+func (s *SlidePart) AddChartRel(targetURI string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	shapeID := s.allocateShapeID()
+	target := opc.NewPackURI(targetURI)
 
-	pic := &XPicture{
-		NonVisual: XNonVisualDrawingPic{
-			CNvPr: &XNvCxnSpPr{
-				ID:   int(shapeID),
-				Name: fmt.Sprintf("Picture %d", shapeID),
-			},
-			CNvPicPr: &XNvPicPr{},
-		},
-		BlipFill: &XBlipFillProperties{
-			Blip: &XBlip{
-				Embed: imageRId,
-			},
-			Stretch: &XStretchProperties{},
-		},
-		ShapeProperties: &XShapeProperties{
-			Transform2D: &XTransform2D{
-				Offset: &XOv2DrOffset{X: x, Y: y},
-				Extent: &XOv2DrExtent{Cx: cx, Cy: cy},
-			},
-		},
+	// 去重检查
+	if existing := s.rels.GetByTarget(target); existing != nil {
+		return existing.RID()
 	}
 
-	s.spTree.Children = append(s.spTree.Children, pic)
-	return pic
+	rel, err := s.rels.AddNew(RelTypeChart, targetURI, false)
+	if err != nil {
+		return ""
+	}
+	return rel.RID()
 }
 
-// AddTable 添加表格到幻灯片
-// x, y, cx, cy: 位置和尺寸（EMU 单位）
-// rows, cols: 行列数
-func (s *SlidePart) AddTable(x, y, cx, cy, rows, cols int) *XGraphicFrame {
+// AddTableRel 添加表格关系（带去重）
+// 返回分配的 rId
+func (s *SlidePart) AddTableRel(targetURI string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	shapeID := s.allocateShapeID()
+	target := opc.NewPackURI(targetURI)
 
-	// 计算单元格尺寸
-	cellW := cx / cols
-
-	// 构建表格网格
-	gridCols := make([]XTableColumn, cols)
-	for i := range gridCols {
-		gridCols[i] = XTableColumn{W: cellW}
+	// 去重检查
+	if existing := s.rels.GetByTarget(target); existing != nil {
+		return existing.RID()
 	}
 
-	// 构建行
-	tableRows := make([]XTableRow, rows)
-	for r := range tableRows {
-		cells := make([]XTableCell, cols)
-		for c := range cells {
-			cells[c] = XTableCell{
-				TextBody: &XTextBody{
-					BodyPr:   &XBodyPr{},
-					LstStyle: &XTextParagraphList{},
-					Paragraphs: []XTextParagraph{
-						{TextRuns: []XTextRun{{Text: ""}}},
-					},
-				},
-			}
-		}
-		tableRows[r] = XTableRow{GridSpan: 1, Cells: cells}
+	rel, err := s.rels.AddNew(RelTypeTable, targetURI, false)
+	if err != nil {
+		return ""
 	}
-
-	table := XTable{
-		Grid: &XTableGrid{GridCols: gridCols},
-		Rows: tableRows,
-	}
-
-	gf := &XGraphicFrame{
-		NonVisual: XNonVisualGraphicFrame{
-			CNvPr: &XNvCxnSpPr{
-				ID:   int(shapeID),
-				Name: fmt.Sprintf("Table %d", shapeID),
-			},
-			CNvGraphicFramePr: &XNvGraphicFramePr{},
-		},
-		Graphic: &XGraphic{
-			Table: &table,
-		},
-		Transform2D: &XTransform2D{
-			Offset: &XOv2DrOffset{X: x, Y: y},
-			Extent: &XOv2DrExtent{Cx: cx, Cy: cy},
-		},
-	}
-
-	s.spTree.Children = append(s.spTree.Children, gf)
-	return gf
-}
-
-// SetTableCellText 设置表格单元格文本
-func (s *SlidePart) SetTableCellText(gf *XGraphicFrame, row, col int, text string) {
-	if gf == nil || gf.Graphic == nil || gf.Graphic.Table == nil {
-		return
-	}
-	table := gf.Graphic.Table
-	if row < 0 || row >= len(table.Rows) || col < 0 || col >= len(table.Rows[row].Cells) {
-		return
-	}
-	table.Rows[row].Cells[col].TextBody.Paragraphs[0].TextRuns[0].Text = text
-}
-
-// ToRelationshipsXML 将 SlideRelationships 转换为 XML
-func (sr *SlideRelationships) ToRelationshipsXML() ([]byte, error) {
-	rels := make([]XRelation, 0)
-
-	// 添加图片关系
-	for rId, uri := range sr.imageRels {
-		rels = append(rels, XRelation{
-			ID:     rId,
-			Type:   RelationshipTypeImage,
-			Target: uri,
-		})
-	}
-
-	// 添加媒体关系
-	for rId, uri := range sr.mediaRels {
-		rels = append(rels, XRelation{
-			ID:     rId,
-			Type:   RelationshipTypeMedia,
-			Target: uri,
-		})
-	}
-
-	// 添加图表关系
-	for rId, uri := range sr.chartRels {
-		rels = append(rels, XRelation{
-			ID:     rId,
-			Type:   RelationshipTypeChart,
-			Target: uri,
-		})
-	}
-
-	// 添加布局关系
-	if sr.layoutRId != "" {
-		rels = append(rels, XRelation{
-			ID:     sr.layoutRId,
-			Type:   RelationshipTypeSlideLayout,
-			Target: "../slideLayouts/slideLayout1.xml", // 实际路径需根据情况调整
-		})
-	}
-
-	// 添加母版关系
-	if sr.masterRId != "" {
-		rels = append(rels, XRelation{
-			ID:     sr.masterRId,
-			Type:   RelationshipTypeSlideMaster,
-			Target: "../slideMasters/slideMaster1.xml", // 实际路径需根据情况调整
-		})
-	}
-
-	xsr := XSlideRelationships{
-		Xmlns: "http://schemas.openxmlformats.org/package/2006/relationships",
-		Rels:  rels,
-	}
-
-	return xml.Marshal(&xsr)
-}
-
-// SlidePart 的 Relationship 便捷方法
-
-// GetRelationshipURI 根据 rId 获取目标 URI
-func (s *SlidePart) GetRelationshipURI(rId string) string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if uri, ok := s.relMgr.imageRels[rId]; ok {
-		return uri
-	}
-	if uri, ok := s.relMgr.mediaRels[rId]; ok {
-		return uri
-	}
-	if uri, ok := s.relMgr.chartRels[rId]; ok {
-		return uri
-	}
-	return ""
-}
-
-// HasImage 判断是否已存在某图片关系
-func (s *SlidePart) HasImage(targetURI string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	for _, uri := range s.relMgr.imageRels {
-		if uri == targetURI {
-			return true
-		}
-	}
-	return false
-}
-
-// HasMedia 判断是否已存在某媒体关系
-func (s *SlidePart) HasMedia(targetURI string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	for _, uri := range s.relMgr.mediaRels {
-		if uri == targetURI {
-			return true
-		}
-	}
-	return false
-}
-
-// GetImageRId 获取图片 rId，不存在则添加
-func (s *SlidePart) GetImageRId(targetURI string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// 先查找
-	for rId, uri := range s.relMgr.imageRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	// 不存在则添加
-	return s.relMgr.AddImageRel(targetURI)
-}
-
-// GetMediaRId 获取媒体 rId，不存在则添加
-func (s *SlidePart) GetMediaRId(targetURI string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for rId, uri := range s.relMgr.mediaRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	return s.relMgr.AddMediaRel(targetURI)
-}
-
-// GetChartRId 获取图表 rId，不存在则添加
-func (s *SlidePart) GetChartRId(targetURI string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for rId, uri := range s.relMgr.chartRels {
-		if uri == targetURI {
-			return rId
-		}
-	}
-	return s.relMgr.AddChartRel(targetURI)
-}
-
-// GetOrAddPicture 添加图片到幻灯片并返回 rId
-func (s *SlidePart) GetOrAddPicture(x, y, cx, cy int, imageURI string) *XPicture {
-	rId := s.GetImageRId(imageURI)
-	return s.AddPicture(x, y, cx, cy, rId)
+	return rel.RID()
 }
 
 // NewXMLWriter 创建新的 XMLWriter
@@ -1380,6 +993,9 @@ func NewXMLWriterPool() *XMLWriterPool {
 		},
 	}
 }
+
+// globalXMLWriterPool 全局 XMLWriter 池，用于统一序列化底座
+var globalXMLWriterPool = NewXMLWriterPool()
 
 // Get 获取或创建一个 XMLWriter
 func (p *XMLWriterPool) Get() *XMLWriter {
@@ -2068,661 +1684,3 @@ func (xtc *XTableCell) WriteXML(xw *XMLWriter) error {
 	return xw.EndElement("a", "tc")
 }
 
-// WriteXML 将 XSlideRelationships 序列化为 XML
-func (xsr *XSlideRelationships) WriteXML(xw *XMLWriter) error {
-	if err := xw.Declaration(); err != nil {
-		return err
-	}
-
-	if err := xw.StartElementWithAttrs("", "Relationships",
-		"xmlns", "http://schemas.openxmlformats.org/package/2006/relationships",
-	); err != nil {
-		return err
-	}
-
-	// 写入关系
-	for _, rel := range xsr.Rels {
-		if err := xw.EmptyElementWithAttrs("", "Relationship",
-			"Id", rel.ID,
-			"Type", rel.Type,
-			"Target", rel.Target,
-		); err != nil {
-			return err
-		}
-	}
-
-	return xw.EndElement("", "Relationships")
-}
-
-// ============================================================================
-// ToXMLFast 方法 - 使用 strings.Builder 的高效 XML 生成
-// ============================================================================
-
-// escapeXMLText 转义 XML 文本内容
-func escapeXMLText(s string) string {
-	var sb strings.Builder
-	sb.Grow(len(s) + 16)
-	for _, r := range s {
-		switch r {
-		case '<':
-			sb.WriteString("&lt;")
-		case '>':
-			sb.WriteString("&gt;")
-		case '&':
-			sb.WriteString("&amp;")
-		case '"':
-			sb.WriteString("&quot;")
-		case '\'':
-			sb.WriteString("&apos;")
-		default:
-			sb.WriteRune(r)
-		}
-	}
-	return sb.String()
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xs *XSlide) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(4096)
-	if err := xs.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XSlide 的 Builder 写入
-func (xs *XSlide) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
-	sb.WriteString(`<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">`)
-
-	// 颜色映射覆盖
-	sb.WriteString(`<p:clrMapOvr><a:defRgbClrModel val="bg1"/></p:clrMapOvr>`)
-
-	// 形状树
-	if xs.CSld != nil && xs.CSld.SpTree != nil {
-		if err := xs.CSld.SpTree.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	sb.WriteString(`</p:sld>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xst *XSpTree) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(4096)
-	if err := xst.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XSpTree 的 Builder 写入
-func (xst *XSpTree) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<p:spTree>`)
-
-	// 非视觉组属性
-	sb.WriteString(`<p:nvGrpSpPr><p:cNvPr id="`)
-	sb.WriteString(strconv.Itoa(xst.NonVisual.CNvPr.ID))
-	sb.WriteString(`"`)
-	if xst.NonVisual.CNvPr.Name != "" {
-		sb.WriteString(` name="`)
-		sb.WriteString(xst.NonVisual.CNvPr.Name)
-		sb.WriteString(`"`)
-	}
-	sb.WriteString(`/><p:cNvGrpSpPr><p:cNvPr/></p:cNvGrpSpPr><p:cNvPr/></p:nvGrpSpPr>`)
-
-	// 组形状属性
-	if xst.GroupShapeProperties != nil && xst.GroupShapeProperties.Xfrm != nil {
-		if err := xst.GroupShapeProperties.Xfrm.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	// 子元素
-	for _, child := range xst.Children {
-		switch v := child.(type) {
-		case *XSp:
-			if err := v.writeXMLToBuilder(sb); err != nil {
-				return err
-			}
-		case *XPicture:
-			if err := v.writeXMLToBuilder(sb); err != nil {
-				return err
-			}
-		case *XGraphicFrame:
-			if err := v.writeXMLToBuilder(sb); err != nil {
-				return err
-			}
-		}
-	}
-
-	sb.WriteString(`</p:spTree>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xt *XTransform2D) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(256)
-	if err := xt.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XTransform2D 的 Builder 写入
-func (xt *XTransform2D) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<a:xfrm>`)
-
-	if xt.Offset != nil {
-		sb.WriteString(`<a:off x="`)
-		sb.WriteString(strconv.Itoa(xt.Offset.X))
-		sb.WriteString(`" y="`)
-		sb.WriteString(strconv.Itoa(xt.Offset.Y))
-		sb.WriteString(`"/>`)
-	}
-
-	if xt.Extent != nil {
-		sb.WriteString(`<a:ext cx="`)
-		sb.WriteString(strconv.Itoa(xt.Extent.Cx))
-		sb.WriteString(`" cy="`)
-		sb.WriteString(strconv.Itoa(xt.Extent.Cy))
-		sb.WriteString(`"/>`)
-	}
-
-	if xt.Rotation != 0 {
-		sb.WriteString(` rot="`)
-		sb.WriteString(strconv.Itoa(xt.Rotation))
-		sb.WriteString(`"`)
-	}
-
-	sb.WriteString(`</a:xfrm>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xsp *XShapeProperties) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(512)
-	if err := xsp.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XShapeProperties 的 Builder 写入
-func (xsp *XShapeProperties) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<p:spPr>`)
-
-	if xsp.Transform2D != nil {
-		if err := xsp.Transform2D.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	if xsp.PresetFill != nil {
-		sb.WriteString(`<a:solidFill>`)
-		if xsp.PresetFill.SrgbClr != nil {
-			sb.WriteString(`<a:srgbClr val="`)
-			sb.WriteString(xsp.PresetFill.SrgbClr.Val)
-			sb.WriteString(`"/>`)
-		} else if xsp.PresetFill.SchemeClr != nil {
-			sb.WriteString(`<a:schemeClr val="`)
-			sb.WriteString(xsp.PresetFill.SchemeClr.Val)
-			sb.WriteString(`"/>`)
-		}
-		sb.WriteString(`</a:solidFill>`)
-	}
-
-	if xsp.Line != nil {
-		sb.WriteString(`<a:ln`)
-		if xsp.Line.Width != 0 {
-			sb.WriteString(` w="`)
-			sb.WriteString(strconv.Itoa(xsp.Line.Width))
-			sb.WriteString(`"`)
-		}
-		sb.WriteString(`>`)
-		if xsp.Line.SolidFill != nil && xsp.Line.SolidFill.SrgbClr != nil {
-			sb.WriteString(`<a:solidFill><a:srgbClr val="`)
-			sb.WriteString(xsp.Line.SolidFill.SrgbClr.Val)
-			sb.WriteString(`"/></a:solidFill>`)
-		}
-		sb.WriteString(`</a:ln>`)
-	}
-
-	sb.WriteString(`</p:spPr>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xs *XSp) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(1024)
-	if err := xs.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XSp 的 Builder 写入
-func (xs *XSp) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<p:sp>`)
-
-	// 非视觉属性
-	sb.WriteString(`<p:nvSpPr><p:cNvPr id="`)
-	sb.WriteString(strconv.Itoa(xs.NonVisual.CNvPr.ID))
-	sb.WriteString(`"`)
-	if xs.NonVisual.CNvPr.Name != "" {
-		sb.WriteString(` name="`)
-		sb.WriteString(xs.NonVisual.CNvPr.Name)
-		sb.WriteString(`"`)
-	}
-	sb.WriteString(`/><p:cNvSpPr><p:cNvPr/></p:cNvSpPr></p:nvSpPr>`)
-
-	if xs.ShapeProperties != nil {
-		if err := xs.ShapeProperties.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	if xs.TextBody != nil {
-		if err := xs.TextBody.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	sb.WriteString(`</p:sp>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xtb *XTextBody) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(512)
-	if err := xtb.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XTextBody 的 Builder 写入
-func (xtb *XTextBody) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<p:txBody><a:bodyPr`)
-	if xtb.BodyPr != nil {
-		if xtb.BodyPr.Wrap != "" {
-			sb.WriteString(` wrap="`)
-			sb.WriteString(xtb.BodyPr.Wrap)
-			sb.WriteString(`"`)
-		}
-		if xtb.BodyPr.Rotation != 0 {
-			sb.WriteString(` rot="`)
-			sb.WriteString(strconv.Itoa(xtb.BodyPr.Rotation))
-			sb.WriteString(`"`)
-		}
-		if xtb.BodyPr.Vertical != "" {
-			sb.WriteString(` vert="`)
-			sb.WriteString(xtb.BodyPr.Vertical)
-			sb.WriteString(`"`)
-		}
-		if xtb.BodyPr.Anchor != "" {
-			sb.WriteString(` anchor="`)
-			sb.WriteString(xtb.BodyPr.Anchor)
-			sb.WriteString(`"`)
-		}
-	}
-	sb.WriteString(`/><a:lstStyle/>`)
-
-	for _, para := range xtb.Paragraphs {
-		if err := para.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	sb.WriteString(`</p:txBody>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xtp *XTextParagraph) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(256)
-	if err := xtp.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XTextParagraph 的 Builder 写入
-func (xtp *XTextParagraph) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<a:p`)
-	if xtp.Level != 0 {
-		sb.WriteString(` lvl="`)
-		sb.WriteString(strconv.Itoa(xtp.Level))
-		sb.WriteString(`"`)
-	}
-	if xtp.Indent != 0 {
-		sb.WriteString(` indent="`)
-		sb.WriteString(strconv.Itoa(xtp.Indent))
-		sb.WriteString(`"`)
-	}
-	if xtp.Alignment != "" {
-		sb.WriteString(` algn="`)
-		sb.WriteString(xtp.Alignment)
-		sb.WriteString(`"`)
-	}
-	sb.WriteString(`>`)
-
-	for _, run := range xtp.TextRuns {
-		if err := run.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	sb.WriteString(`</a:p>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xtr *XTextRun) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(256)
-	if err := xtr.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XTextRun 的 Builder 写入
-func (xtr *XTextRun) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<a:r>`)
-
-	if xtr.TextProperties != nil {
-		props := xtr.TextProperties
-		sb.WriteString(`<a:rPr`)
-		if props.FontSize != 0 {
-			sb.WriteString(` sz="`)
-			sb.WriteString(strconv.Itoa(props.FontSize))
-			sb.WriteString(`"`)
-		}
-		if props.Bold {
-			sb.WriteString(` b="1"`)
-		}
-		if props.Italic {
-			sb.WriteString(` i="1"`)
-		}
-		if props.Underline != "" {
-			sb.WriteString(` u="`)
-			sb.WriteString(props.Underline)
-			sb.WriteString(`"`)
-		}
-		sb.WriteString(`>`)
-
-		if props.FontFace != "" {
-			sb.WriteString(`<a:latin typeface="`)
-			sb.WriteString(props.FontFace)
-			sb.WriteString(`"/>`)
-		}
-		if props.Color != "" {
-			sb.WriteString(`<a:solidFill><a:srgbClr val="`)
-			sb.WriteString(props.Color)
-			sb.WriteString(`"/></a:solidFill>`)
-		}
-		sb.WriteString(`</a:rPr>`)
-	}
-
-	sb.WriteString(`<a:t>`)
-	sb.WriteString(escapeXMLText(xtr.Text))
-	sb.WriteString(`</a:t>`)
-
-	sb.WriteString(`</a:r>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xp *XPicture) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(1024)
-	if err := xp.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XPicture 的 Builder 写入
-func (xp *XPicture) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<p:pic>`)
-
-	sb.WriteString(`<p:nvPicPr><p:cNvPr id="`)
-	sb.WriteString(strconv.Itoa(xp.NonVisual.CNvPr.ID))
-	sb.WriteString(`"`)
-	if xp.NonVisual.CNvPr.Name != "" {
-		sb.WriteString(` name="`)
-		sb.WriteString(xp.NonVisual.CNvPr.Name)
-		sb.WriteString(`"`)
-	}
-	sb.WriteString(`/><p:cNvPicPr><p:cNvPr/></p:cNvPicPr></p:nvPicPr>`)
-
-	if xp.BlipFill != nil {
-		if err := xp.BlipFill.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	if xp.ShapeProperties != nil {
-		if err := xp.ShapeProperties.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	sb.WriteString(`</p:pic>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xbfp *XBlipFillProperties) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(512)
-	if err := xbfp.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XBlipFillProperties 的 Builder 写入
-func (xbfp *XBlipFillProperties) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<p:blipFill>`)
-
-	if xbfp.Blip != nil {
-		sb.WriteString(`<a:blip`)
-		if xbfp.Blip.Embed != "" {
-			sb.WriteString(` r:embed="`)
-			sb.WriteString(xbfp.Blip.Embed)
-			sb.WriteString(`"`)
-		}
-		sb.WriteString(`/>`)
-	}
-
-	sb.WriteString(`<a:stretch><a:fillRect/></a:stretch>`)
-
-	sb.WriteString(`</p:blipFill>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xgf *XGraphicFrame) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(2048)
-	if err := xgf.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XGraphicFrame 的 Builder 写入
-func (xgf *XGraphicFrame) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<p:graphicFrame>`)
-
-	sb.WriteString(`<p:nvGraphicFramePr><p:cNvPr id="`)
-	sb.WriteString(strconv.Itoa(xgf.NonVisual.CNvPr.ID))
-	sb.WriteString(`"`)
-	if xgf.NonVisual.CNvPr.Name != "" {
-		sb.WriteString(` name="`)
-		sb.WriteString(xgf.NonVisual.CNvPr.Name)
-		sb.WriteString(`"`)
-	}
-	sb.WriteString(`/><p:cNvGraphicFramePr><p:cNvPr/></p:cNvGraphicFramePr></p:nvGraphicFramePr>`)
-
-	if xgf.Transform2D != nil {
-		if err := xgf.Transform2D.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	if xgf.Graphic != nil && xgf.Graphic.Table != nil {
-		sb.WriteString(`<a:graphic>`)
-		if err := xgf.Graphic.Table.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-		sb.WriteString(`</a:graphic>`)
-	}
-
-	sb.WriteString(`</p:graphicFrame>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xt *XTable) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(4096)
-	if err := xt.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XTable 的 Builder 写入
-func (xt *XTable) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl>`)
-
-	// 表格网格
-	sb.WriteString(`<a:tblGrid>`)
-	for _, col := range xt.Grid.GridCols {
-		sb.WriteString(`<a:gridCol w="`)
-		sb.WriteString(strconv.Itoa(col.W))
-		sb.WriteString(`"/>`)
-	}
-	sb.WriteString(`</a:tblGrid>`)
-
-	// 行
-	for _, row := range xt.Rows {
-		if err := row.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	sb.WriteString(`</a:tbl></a:graphicData>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xtr *XTableRow) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(1024)
-	if err := xtr.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XTableRow 的 Builder 写入
-func (xtr *XTableRow) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<a:tr`)
-	if xtr.GridSpan > 1 {
-		sb.WriteString(` gridSpan="`)
-		sb.WriteString(strconv.Itoa(xtr.GridSpan))
-		sb.WriteString(`"`)
-	}
-	sb.WriteString(`>`)
-
-	for _, cell := range xtr.Cells {
-		if err := cell.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	sb.WriteString(`</a:tr>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xtc *XTableCell) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(512)
-	if err := xtc.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XTableCell 的 Builder 写入
-func (xtc *XTableCell) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<a:tc`)
-	if xtc.GridSpan > 1 {
-		sb.WriteString(` gridSpan="`)
-		sb.WriteString(strconv.Itoa(xtc.GridSpan))
-		sb.WriteString(`"`)
-	}
-	if xtc.RowSpan > 1 {
-		sb.WriteString(` rowSpan="`)
-		sb.WriteString(strconv.Itoa(xtc.RowSpan))
-		sb.WriteString(`"`)
-	}
-	if xtc.Vertical != "" {
-		sb.WriteString(` anchor="`)
-		sb.WriteString(xtc.Vertical)
-		sb.WriteString(`"`)
-	}
-	sb.WriteString(`>`)
-
-	if xtc.TextBody != nil {
-		if err := xtc.TextBody.writeXMLToBuilder(sb); err != nil {
-			return err
-		}
-	}
-
-	sb.WriteString(`</a:tc>`)
-	return nil
-}
-
-// ToXMLFast 使用 strings.Builder 高效生成 XML 字节数组
-func (xsr *XSlideRelationships) ToXMLFast() ([]byte, error) {
-	var sb strings.Builder
-	sb.Grow(512)
-	if err := xsr.writeXMLToBuilder(&sb); err != nil {
-		return nil, err
-	}
-	return []byte(sb.String()), nil
-}
-
-// writeXMLToBuilder 实现 XSlideRelationships 的 Builder 写入
-func (xsr *XSlideRelationships) writeXMLToBuilder(sb *strings.Builder) error {
-	sb.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
-	sb.WriteString(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`)
-
-	for _, rel := range xsr.Rels {
-		sb.WriteString(`<Relationship Id="`)
-		sb.WriteString(rel.ID)
-		sb.WriteString(`" Type="`)
-		sb.WriteString(rel.Type)
-		sb.WriteString(`" Target="`)
-		sb.WriteString(rel.Target)
-		sb.WriteString(`"/>`)
-	}
-
-	sb.WriteString(`</Relationships>`)
-	return nil
-}
