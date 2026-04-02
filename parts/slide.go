@@ -806,9 +806,14 @@ func (xw *XMLWriter) Flush() error {
 	return err
 }
 
-// Bytes 返回缓冲区内容
+// Bytes 返回缓冲区内容的副本（并发安全）
+// 注意：必须返回副本，因为 XMLWriter 会被池化复用
+// 如果返回引用，当 writer 被放回池并重新使用时会导致数据竞争
 func (xw *XMLWriter) Bytes() []byte {
-	return xw.buf
+	// 创建副本以避免竞态条件
+	result := make([]byte, len(xw.buf))
+	copy(result, xw.buf)
+	return result
 }
 
 // String 返回缓冲区内容的字符串形式

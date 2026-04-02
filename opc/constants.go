@@ -22,6 +22,10 @@ const (
 	ContentTypeThemeOverride  = "application/vnd.openxmlformats-officedocument.themeOverride+xml"
 	ContentTypeStyles         = "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"
 
+	// 图表
+	ContentTypeChart          = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+	ContentTypeChartEx        = "application/vnd.ms-office.chartex+xml"
+
 	// 核心属性
 	ContentTypeCoreProperties = "application/vnd.openxmlformats-package.core-properties+xml"
 
